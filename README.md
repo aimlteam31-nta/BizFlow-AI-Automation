@@ -1,3 +1,6 @@
+Live Demo Link: https://bizflowaierp.lovable.app/
+
+
 # BizFlow AI — Intelligent ERP for Pakistani SMBs
 
 > AI-powered business automation platform integrating WooCommerce, Supabase, n8n, OpenAI, and Telegram for small and medium businesses.
