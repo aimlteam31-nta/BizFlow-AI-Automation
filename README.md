@@ -1,5 +1,7 @@
 Live Demo Link: https://bizflowaierp.lovable.app/
 
+Video Presentation: https://drive.google.com/file/d/1oM5utFkX_oHx7HfgsR6v_l9drqdiFYH2/view?usp=sharing
+
 
 # BizFlow AI — Intelligent ERP for Pakistani SMBs
 
