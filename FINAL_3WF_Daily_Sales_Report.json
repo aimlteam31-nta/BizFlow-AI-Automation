@@ -1,0 +1,791 @@
+{
+  "name": "FINAL_3WF_Daily_Sales_Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "8d030a7c-d8ec-4af5-9f42-6a273708061d",
+      "name": "Daily 9AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        4624,
+        3696
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses?status=eq.active&select=business_id,business_name,telegram_chat_id,website_url,wc_consumer_key_encrypted,wc_consumer_secret_encrypted",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "aec130d9-eae3-4d38-83cb-67c8330545b1",
+      "name": "Fetch Active Businesses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4848,
+        3696
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst allBiz = Array.isArray(raw) ? raw : (Array.isArray(raw.body) ? raw.body : [raw]);\n\nif (allBiz.length === 0) {\n  return [{ json: { skip: true, reason: 'No active businesses' } }];\n}\n\nconst seen = new Set();\nconst businesses = allBiz.filter(biz => {\n  if (!biz.telegram_chat_id) return false;\n  if (seen.has(biz.telegram_chat_id)) return false;\n  seen.add(biz.telegram_chat_id);\n  return true;\n});\n\nif (businesses.length === 0) {\n  return [{ json: { skip: true, reason: 'No businesses with Telegram' } }];\n}\n\nconst now = new Date();\nconst todayStr      = now.toISOString().split('T')[0];\nconst tomorrow      = new Date(now); tomorrow.setDate(now.getDate() + 1);\nconst tomorrowStr   = tomorrow.toISOString().split('T')[0];\nconst yesterday     = new Date(now); yesterday.setDate(now.getDate() - 1);\nconst yesterdayStr  = yesterday.toISOString().split('T')[0];\nconst dow           = now.getDay() || 7;\nconst mon           = new Date(now); mon.setDate(now.getDate() - dow + 1);\nconst weekStartStr  = mon.toISOString().split('T')[0];\nconst lastWeekMon   = new Date(mon); lastWeekMon.setDate(mon.getDate() - 7);\nconst lastWeekStr   = lastWeekMon.toISOString().split('T')[0];\nconst monthStartStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];\n\nreturn businesses.map(biz => ({\n  json: {\n    business_id:        biz.business_id,\n    business_name:      biz.business_name,\n    telegram_chat_id:   biz.telegram_chat_id,\n    website_url:        biz.website_url,\n    wc_consumer_key:    biz.wc_consumer_key_encrypted,\n    wc_consumer_secret: biz.wc_consumer_secret_encrypted,\n    reportDate:         todayStr,\n    todayStart:         todayStr + 'T00:00:00',\n    todayEnd:           tomorrowStr + 'T00:00:00',\n    yesterdayStart:     yesterdayStr + 'T00:00:00',\n    yesterdayEnd:       todayStr + 'T00:00:00',\n    weekStart:          weekStartStr + 'T00:00:00',\n    weekEnd:            tomorrowStr + 'T00:00:00',\n    lastWeekStart:      lastWeekStr + 'T00:00:00',\n    lastWeekEnd:        weekStartStr + 'T00:00:00',\n    monthStart:         monthStartStr + 'T00:00:00',\n    monthEnd:           tomorrowStr + 'T00:00:00'\n  }\n}));"
+      },
+      "id": "b6145b56-d30f-48d8-bb1f-1c957723e472",
+      "name": "Prepare Date Ranges",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5072,
+        3696
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "skip-cond-01",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "71cdc7fe-cdf1-4915-abca-0b794acb56a2",
+      "name": "Any Businesses?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5296,
+        3696
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { done: true, message: 'No active businesses — report skipped', ts: new Date().toISOString() } }];"
+      },
+      "id": "a3451672-5692-49e1-8f8e-da9066b28a1e",
+      "name": "Stop No Businesses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5520,
+        3792
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\nreturn [{\n  json: {\n    ...d,\n    syncUrl: `${d.website_url}/wp-json/wc/v3/orders?status=completed,processing&per_page=100&orderby=date&order=desc&after=${d.yesterdayStart}`,\n    syncReady: true\n  }\n}];"
+      },
+      "id": "a0219880-c00b-4fa9-a8b1-f7392792c21a",
+      "name": "Prepare WC Sync",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5520,
+        3600
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.syncUrl }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "consumer_key",
+              "value": "={{ $json.wc_consumer_key }}"
+            },
+            {
+              "name": "consumer_secret",
+              "value": "={{ $json.wc_consumer_secret }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "db9a3238-b3e9-41bc-8f96-84c3a5d54e2e",
+      "name": "Fetch Recent WC Orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5744,
+        3600
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d   = $('Prepare WC Sync').first().json;\nconst raw = $input.first().json;\nconst orders = Array.isArray(raw.body) ? raw.body : [];\nconst business_id = d.business_id;\n\nif (orders.length === 0) {\n  return [{ json: { ...d, _synced_orders: 0, _order_batch: [], _line_items_batch: [] } }];\n}\n\nconst orderBatch = orders.map(o => ({\n  business_id,\n  wc_order_id:           o.id,\n  order_number:          String(o.number || o.id),\n  status:                o.status || 'pending',\n  currency:              o.currency || 'PKR',\n  total:                 parseFloat(o.total) || 0,\n  total_refunded:        parseFloat(o.total_refunded) || 0,\n  subtotal:              parseFloat(o.subtotal) || 0,\n  tax_total:             parseFloat(o.total_tax) || 0,\n  shipping_total:        parseFloat(o.shipping_total) || 0,\n  discount_total:        parseFloat(o.discount_total) || 0,\n  customer_email:        o.billing?.email || null,\n  customer_phone:        o.billing?.phone || null,\n  customer_name:         o.billing ? `${o.billing.first_name||''} ${o.billing.last_name||''}`.trim() || null : null,\n  billing_address:       o.billing || {},\n  shipping_address:      o.shipping || {},\n  line_items:            o.line_items || [],\n  payment_method:        o.payment_method || null,\n  payment_method_title:  o.payment_method_title || null,\n  transaction_id:        o.transaction_id || null,\n  date_created:          o.date_created || null,\n  date_modified:         o.date_modified || null,\n  date_completed:        o.date_completed || null,\n  date_paid:             o.date_paid || null,\n  last_synced_at:        new Date().toISOString()\n}));\n\nconst lineItemsBatch = [];\nfor (const o of orders) {\n  for (const item of (o.line_items || [])) {\n    if (!item.id) continue;\n    lineItemsBatch.push({\n      business_id,\n      wc_order_id:      o.id,\n      wc_order_item_id: item.id,\n      product_id:       item.product_id || null,\n      variation_id:     item.variation_id || null,\n      product_name:     (item.name || 'Unknown').substring(0, 500),\n      sku:              item.sku || null,\n      quantity:         parseInt(item.quantity) || 1,\n      price:            parseFloat(item.price) || 0,\n      subtotal:         parseFloat(item.subtotal) || 0,\n      total:            parseFloat(item.total) || 0,\n      tax:              parseFloat(item.total_tax) || 0,\n      order_date:       o.date_created || null,\n      order_status:     o.status || null,\n      last_synced_at:   new Date().toISOString()\n    });\n  }\n}\n\nreturn [{ json: { ...d, _synced_orders: orders.length, _order_batch: orderBatch, _line_items_batch: lineItemsBatch } }];"
+      },
+      "id": "34900f28-ca85-43d1-b4ec-d732f1e00645",
+      "name": "Process WC Orders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5968,
+        3600
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders?on_conflict=business_id,wc_order_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._order_batch || []) }}",
+        "options": {}
+      },
+      "id": "58d2e960-4db7-491b-bb2c-dc5a21f81f84",
+      "name": "Upsert Orders to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6192,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_order_items?on_conflict=business_id,wc_order_id,wc_order_item_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Process WC Orders').first().json._line_items_batch || []) }}",
+        "options": {}
+      },
+      "id": "52154e26-3c8a-4b53-8a68-fed8571a4b3a",
+      "name": "Upsert Line Items to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6416,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders?business_id=eq.{{ $('Prepare WC Sync').first().json.business_id }}&date_created=gte.{{ $('Prepare WC Sync').first().json.todayStart }}&date_created=lt.{{ $('Prepare WC Sync').first().json.todayEnd }}&status=in.(completed,processing)&select=wc_order_id,total,total_refunded,currency,status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "5874b62d-3de8-41a6-8b6e-de12645e4320",
+      "name": "Query Today Sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6640,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders?business_id=eq.{{ $('Prepare WC Sync').first().json.business_id }}&date_created=gte.{{ $('Prepare WC Sync').first().json.yesterdayStart }}&date_created=lt.{{ $('Prepare WC Sync').first().json.yesterdayEnd }}&status=in.(completed,processing)&select=wc_order_id,total,total_refunded,currency,status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "9c453577-d359-4c28-8fcf-02e0f1198c64",
+      "name": "Query Yesterday Sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6864,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders?business_id=eq.{{ $('Prepare WC Sync').first().json.business_id }}&date_created=gte.{{ $('Prepare WC Sync').first().json.weekStart }}&date_created=lt.{{ $('Prepare WC Sync').first().json.weekEnd }}&status=in.(completed,processing)&select=wc_order_id,total,total_refunded,currency,status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "d23f941d-c8fd-4ddd-9e50-d887fb975629",
+      "name": "Query This Week Sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7088,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_order_items?business_id=eq.{{ $('Prepare WC Sync').first().json.business_id }}&order_date=gte.{{ $('Prepare WC Sync').first().json.weekStart }}&order_date=lt.{{ $('Prepare WC Sync').first().json.weekEnd }}&select=product_name,quantity,total&order=total.desc&limit=10",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "afb13704-4fc6-4ee0-8611-d4b4045b58af",
+      "name": "Query Top Products Week",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7312,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const biz = $('Prepare WC Sync').first().json;\n\nfunction calcSales(nodeName) {\n  try {\n    const raw = $(nodeName).first().json;\n    const rows = raw.body ? raw.body : (Array.isArray(raw) ? raw : []);\n    const totalOrders  = rows.length;\n    const netSales     = rows.reduce((s, r) => s + (parseFloat(r.total)||0) - (parseFloat(r.total_refunded)||0), 0);\n    const grossRevenue = rows.reduce((s, r) => s + (parseFloat(r.total)||0), 0);\n    const currency     = rows[0]?.currency || 'PKR';\n    return { totalOrders, netSales, grossRevenue, currency };\n  } catch(e) {\n    return { totalOrders: 0, netSales: 0, grossRevenue: 0, currency: 'PKR' };\n  }\n}\n\nfunction getTopProducts(nodeName) {\n  try {\n    const allItems = $(nodeName).all();\n    let rows = [];\n    if (allItems.length > 1) {\n      rows = allItems.map(item => item.json);\n    } else {\n      const raw = allItems[0]?.json || {};\n      rows = Array.isArray(raw) ? raw : (raw.body ? raw.body : []);\n    }\n    const productMap = {};\n    rows.forEach(r => {\n      const name = r.product_name || 'Unknown';\n      if (!productMap[name]) productMap[name] = { qty: 0, revenue: 0 };\n      productMap[name].qty     += parseInt(r.quantity) || 0;\n      productMap[name].revenue += parseFloat(r.total) || 0;\n    });\n    return Object.entries(productMap).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 3);\n  } catch(e) { return []; }\n}\n\n// Only run on last trigger (when Query Top Products Last Week feeds us)\nconst inputNode = $input.first().json;\nconst inputHasProducts = inputNode.product_name !== undefined;\n// If input is from Top Products Week (not Last Week), skip — wait for Last Week\n// We check by seeing if lastWeekStart exists in biz — always true so just build report\n\nconst today        = calcSales('Query Today Sales');\nconst yesterday    = calcSales('Query Yesterday Sales');\nconst week         = calcSales('Query This Week Sales');\nconst topProducts  = getTopProducts('Query Top Products Week');\nconst lastWeekProd = getTopProducts('Query Top Products Last Week');\n\nconst fmt = n => n.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\nconst currency = today.currency || yesterday.currency || 'PKR';\n\nlet growthStr = '';\nif (yesterday.netSales > 0) {\n  const growth = ((today.netSales - yesterday.netSales) / yesterday.netSales * 100).toFixed(1);\n  growthStr = parseFloat(growth) >= 0 ? ` 📈 +${growth}%` : ` 📉 ${growth}%`;\n}\n\nlet msg = `📊 *Daily Sales Report*\\n`;\nmsg += `📅 ${biz.reportDate} | 🏢 ${biz.business_name}\\n`;\nmsg += `━━━━━━━━━━━━━━━━━━━━━━━━\\n\\n`;\n\nmsg += `*Today*\\n`;\nif (today.totalOrders > 0) {\n  msg += `✅ Orders: ${today.totalOrders}${growthStr}\\n`;\n  msg += `💰 Net Sales: ${currency} ${fmt(today.netSales)}\\n`;\n  msg += `📦 Gross: ${currency} ${fmt(today.grossRevenue)}\\n`;\n} else {\n  msg += `No orders today.\\n`;\n}\n\nmsg += `\\n*Yesterday*\\n`;\nif (yesterday.totalOrders > 0) {\n  msg += `✅ Orders: ${yesterday.totalOrders}\\n`;\n  msg += `💰 Net Sales: ${currency} ${fmt(yesterday.netSales)}\\n`;\n} else {\n  msg += `No orders yesterday.\\n`;\n}\n\nmsg += `\\n*This Week*\\n`;\nif (week.totalOrders > 0) {\n  msg += `✅ Orders: ${week.totalOrders}\\n`;\n  msg += `💰 Net Sales: ${currency} ${fmt(week.netSales)}\\n`;\n  msg += `📦 Gross: ${currency} ${fmt(week.grossRevenue)}\\n`;\n} else {\n  msg += `No orders this week yet.\\n`;\n}\n\nif (topProducts.length > 0) {\n  msg += `\\n*🏆 Top Products (This Week)*\\n`;\n  topProducts.forEach(([name, d], idx) => {\n    msg += `${idx+1}. ${name} — ${d.qty} units | ${currency} ${fmt(d.revenue)}\\n`;\n  });\n}\n\nif (lastWeekProd.length > 0) {\n  msg += `\\n*📦 Top Products (Last Week)*\\n`;\n  lastWeekProd.forEach(([name, d], idx) => {\n    msg += `${idx+1}. ${name} — ${d.qty} units | ${currency} ${fmt(d.revenue)}\\n`;\n  });\n}\n\nmsg += `\\n_Automated report by BizFlow AI_`;\n\nif (msg.length > 4000) msg = msg.substring(0, 4000) + '...\\n_BizFlow AI_';\n\nreturn [{ json: { ...biz, reportMessage: msg } }];"
+      },
+      "id": "746faa29-1f3d-44ab-9111-80f374d2c451",
+      "name": "Build Report Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7760,
+        3600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "tg-cond-01",
+              "leftValue": "={{ $json.telegram_chat_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1eb3062-94f1-4e21-9334-7ff79354686b",
+      "name": "Has Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        7984,
+        3600
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "text": "={{ $json.reportMessage }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "a9189868-25b5-4efc-8537-407af48efc76",
+      "name": "Send Telegram Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        8208,
+        3504
+      ],
+      "webhookId": "2801ad76-0653-47e4-8cbb-ee9a8c81f3ac",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ...$input.first().json, telegram_skipped: true } }];"
+      },
+      "id": "8033bb1f-9f4e-412d-8237-1d14aae2bb05",
+      "name": "Skip No Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8208,
+        3696
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/daily_reports?on_conflict=business_id,report_date",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_id: $('Build Report Message').first().json.business_id, report_date: $('Build Report Message').first().json.reportDate, today_orders: $('Build Report Message').first().json.todaySales.totalOrders, today_net_sales: $('Build Report Message').first().json.todaySales.netSales, today_gross: $('Build Report Message').first().json.todaySales.grossRevenue, yesterday_orders: $('Build Report Message').first().json.yesterdaySales.totalOrders, yesterday_net_sales: $('Build Report Message').first().json.yesterdaySales.netSales, week_orders: $('Build Report Message').first().json.weekSales.totalOrders, week_net_sales: $('Build Report Message').first().json.weekSales.netSales, top_products: $('Build Report Message').first().json.top3Products, report_sent: true, sent_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "5260208a-c4a0-4349-a1ad-59359e29b8ec",
+      "name": "Log Report to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8432,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_order_items?business_id=eq.{{ $('Prepare WC Sync').first().json.business_id }}&order_date=gte.{{ $('Prepare WC Sync').first().json.lastWeekStart }}&order_date=lt.{{ $('Prepare WC Sync').first().json.lastWeekEnd }}&select=product_name,quantity,total&order=total.desc&limit=10",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a50e2765-d740-400a-9f1c-a0f12047ffc3",
+      "name": "Query Top Products Last Week",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7536,
+        3600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily 9AM Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Active Businesses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Active Businesses": {
+      "main": [
+        [
+          {
+            "node": "Prepare Date Ranges",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Date Ranges": {
+      "main": [
+        [
+          {
+            "node": "Any Businesses?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Businesses?": {
+      "main": [
+        [
+          {
+            "node": "Stop No Businesses",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare WC Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare WC Sync": {
+      "main": [
+        [
+          {
+            "node": "Fetch Recent WC Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Recent WC Orders": {
+      "main": [
+        [
+          {
+            "node": "Process WC Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process WC Orders": {
+      "main": [
+        [
+          {
+            "node": "Upsert Orders to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Orders to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Upsert Line Items to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Line Items to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Query Today Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Today Sales": {
+      "main": [
+        [
+          {
+            "node": "Query Yesterday Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Yesterday Sales": {
+      "main": [
+        [
+          {
+            "node": "Query This Week Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query This Week Sales": {
+      "main": [
+        [
+          {
+            "node": "Query Top Products Week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Top Products Week": {
+      "main": [
+        [
+          {
+            "node": "Query Top Products Last Week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report Message": {
+      "main": [
+        [
+          {
+            "node": "Has Telegram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Telegram?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip No Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Report": {
+      "main": [
+        [
+          {
+            "node": "Log Report to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip No Telegram": {
+      "main": [
+        [
+          {
+            "node": "Log Report to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Top Products Last Week": {
+      "main": [
+        [
+          {
+            "node": "Build Report Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "b39d47c2-0529-4c6c-99e5-9745db7a1376",
+  "meta": {
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "Dr7JShVmFAiLcDZNohRQN",
+  "tags": []
+}
