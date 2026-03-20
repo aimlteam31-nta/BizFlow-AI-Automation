@@ -1,0 +1,1303 @@
+{
+  "name": "FINAL_2WF_Telegram Message Handler (Text & Voice)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "86687626-c30f-4b4f-97e6-e565331faac0",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -4336,
+        560
+      ],
+      "webhookId": "64ddacfd-f72c-4e34-9c8c-f5248afb270d",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const update = $input.first().json;\nconst message = update.message || update.edited_message;\n\nif (!message) {\n  return [{ json: { error: 'No message found', skip: true } }];\n}\n\nconst chatId = String(message.chat?.id || '');\nconst userId = String(message.from?.id || '');\nconst messageId = String(message.message_id || '');\nconst username = message.from?.username || message.from?.first_name || '';\n\nconst isVoice = !!message.voice;\nconst isText  = !!message.text;\nconst messageType = isVoice ? 'voice' : (isText ? 'text' : 'unsupported');\n\nreturn [{\n  json: {\n    chatId,\n    userId,\n    messageId,\n    username,\n    isVoice,\n    isText,\n    messageType,\n    fileId:      message.voice?.file_id || null,\n    textContent: message.text || null,\n    startTime:   Date.now(),\n    timestamp:   new Date().toISOString()\n  }\n}];"
+      },
+      "id": "eef4b17b-a156-495c-9619-b79c731f0b17",
+      "name": "Extract Message Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4112,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses?telegram_chat_id=eq.{{ $json.chatId }}&select=business_id,business_name,status,website_url,wc_consumer_key_encrypted,wc_consumer_secret_encrypted&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2fcf5a89-e6b4-40a9-abcf-1067bf457186",
+      "name": "Lookup Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3424,
+        1040
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const msgData = $('Extract Message Data').first().json;\nconst raw = $input.first().json;\n\n// PostgREST returns array; pick first row\nconst biz = Array.isArray(raw) ? raw[0] : raw;\nconst businessFound = !!(biz && biz.business_id);\nconst isActive = biz?.status === 'active';\n\nreturn [{\n  json: {\n    ...msgData,\n    businessId:           businessFound ? biz.business_id : null,\n    businessName:         businessFound ? biz.business_name : null,\n    websiteUrl:           businessFound ? (biz.website_url || null) : null,\n    wcConsumerKey:        businessFound ? (biz.wc_consumer_key_encrypted || null) : null,\n    wcConsumerSecret:     businessFound ? (biz.wc_consumer_secret_encrypted || null) : null,\n    businessFound,\n    isActive\n  }\n}];"
+      },
+      "id": "2c72d07b-8592-427b-9ff5-db876379f833",
+      "name": "Process Business Lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3200,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "biz-valid-cond-1",
+              "leftValue": "={{ $json.businessFound }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "biz-valid-cond-2",
+              "leftValue": "={{ $json.isActive }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f00b8d08-46b3-411a-aed2-59424aabb538",
+      "name": "Business Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2976,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "voice-detect-cond",
+              "leftValue": "={{ $json.isVoice }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "eccf06e2-3684-4c58-8358-ffe8b1b950a5",
+      "name": "Detect Input Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2752,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $('Extract Message Data').first().json.fileId }}",
+        "additionalFields": {}
+      },
+      "id": "e0696958-7441-4b72-810d-55294c118a71",
+      "name": "Get Voice File",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -2528,
+        848
+      ],
+      "webhookId": "94a00363-af21-4829-9626-5b62afd659b8",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-1"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3aec8443-d716-4ddc-882b-3a913a04e546",
+      "name": "Transcribe with Whisper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2304,
+        848
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "PQfPyqdpbAK30RzL",
+          "name": "OpenAi account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const bizData = $('Process Business Lookup').first().json;\nconst whisper = $input.first().json;\n\n// Whisper returns { text: '...' } directly\nconst text = whisper.text || whisper.body?.text || '';\n\nif (!text || text.trim() === '') {\n  return [{\n    json: {\n      ...bizData,\n      queryText: '',\n      inputSource: 'voice',\n      transcription: null,\n      error: 'Voice transcription empty or failed'\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...bizData,\n    queryText:     text.trim(),\n    inputSource:   'voice',\n    transcription: text.trim()\n  }\n}];"
+      },
+      "id": "9461ab62-97a2-4cc9-a9c0-f0607664eedd",
+      "name": "Process Transcription",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2080,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const bizData = $('Process Business Lookup').first().json;\nconst text    = bizData.textContent || '';\n\nreturn [{\n  json: {\n    ...bizData,\n    queryText:   text,\n    inputSource: 'text',\n    transcription: null\n  }\n}];"
+      },
+      "id": "e3d2915b-0ecd-43ba-ad1b-7341e92d10b7",
+      "name": "Use Text Directly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2080,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'gpt-4o',\n  temperature: 0.1,\n  messages: [{\n    role: 'system',\n    content: `You are an intent classifier for a WooCommerce business bot. Classify the user message into EXACTLY ONE intent:\n\nsales_query — asks about sales, revenue, orders, earnings, income, kitni sale, aaj ki sale, kisi din ki sale\ninventory_check — asks about stock, inventory, products, maal, available items, kisi product ka stock\nreport_request — asks for report, summary, top products, best sellers, weekly report, monthly report\ngeneral_inquiry — greetings, help, anything else\n\nExtract these entities:\n- time_period: today / yesterday / this week / this month / last week / last month / specific_date (default: today)\n- specific_date: if user mentions a specific date like \"15 feb\", \"15 february 2026\", \"feb 15\" extract it as YYYY-MM-DD format. else null\n- product_name: specific product name if mentioned, else null\n\nREPLY ONLY with raw JSON, no markdown:\n{\"intent\":\"sales_query\",\"confidence\":0.9,\"entities\":{\"time_period\":\"today\",\"specific_date\":null,\"product_name\":null}}`\n  }, {\n    role: 'user',\n    content: $json.queryText\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "719930e7-170e-48a9-9d5e-df2fbc8f8226",
+      "name": "Classify Intent (GPT-4)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1856,
+        944
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "PQfPyqdpbAK30RzL",
+          "name": "OpenAi account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const gpt = $input.first().json;\n\n// ── Get query text from whichever branch ran ──\nlet ctx = {};\ntry { ctx = $('Process Transcription').first().json; } catch(e) {}\nif (!ctx.queryText) { try { ctx = $('Use Text Directly').first().json; } catch(e) {} }\n\nconst q = (ctx.queryText || ctx.textContent || '').toLowerCase().trim();\n\n// ══════════════════════════════════════════════════════════════\n// KEYWORD RULES — 100% reliable, runs first, no GPT dependency\n// ══════════════════════════════════════════════════════════════\nlet intent = null;\nlet timePeriod = 'today';\n\n// Report keywords\nif (/report|weekly report|monthly report|top product|best seller|summary/.test(q)) {\n  intent = 'report_request';\n  if      (/last week|pichle hafte/.test(q))     timePeriod = 'last week';\n  else if (/last month|pichle mahine/.test(q))   timePeriod = 'last month';\n  else if (/this month|is mahine|monthly/.test(q)) timePeriod = 'this month';\n  else                                             timePeriod = 'this week';\n}\n// Inventory keywords\nelse if (/inventory|stock/.test(q)) {\n  intent = 'inventory_check';\n}\n// Sales keywords\nelse if (/sale|revenue|order|earn|income|kitni|bikri|aaj ki/.test(q)) {\n  intent = 'sales_query';\n  if      (/last week|pichle hafte/.test(q))     timePeriod = 'last week';\n  else if (/last month|pichle mahine/.test(q))   timePeriod = 'last month';\n  else if (/this month|is mahine|monthly/.test(q)) timePeriod = 'this month';\n  else if (/this week|is hafte|weekly/.test(q))  timePeriod = 'this week';\n  else if (/yesterday|kal ka|kal ki/.test(q))    timePeriod = 'yesterday';\n  else                                             timePeriod = 'today';\n}\n\n// ══════════════════════════════════════════════════════════════\n// GPT FALLBACK — only if keywords matched nothing\n// ══════════════════════════════════════════════════════════════\nif (!intent) {\n  try {\n    const content = gpt.choices?.[0]?.message?.content || gpt.message?.content || gpt.text || '';\n    if (content) {\n      const cleaned = content.replace(/```json\\s*/gi, '').replace(/```\\s*/g, '').trim();\n      const m = cleaned.match(/\\{[\\s\\S]*\\}/);\n      if (m) {\n        const parsed = JSON.parse(m[0]);\n        if (parsed.intent) {\n          intent = parsed.intent;\n          timePeriod = parsed.entities?.time_period || 'today';\n        }\n      }\n    }\n  } catch(e) {}\n}\n\n// Final fallback\nconst validIntents = ['sales_query','inventory_check','report_request','general_inquiry'];\nif (!intent || !validIntents.includes(intent)) intent = 'general_inquiry';\n\n// ══════════════════════════════════════════════════════════════\n// SPECIFIC DATE extract\n// ══════════════════════════════════════════════════════════════\nlet specificDate = null;\nconst months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };\nconst dm = q.match(/(\\d{1,2})\\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\s*(\\d{4})?/i);\nconst md = q.match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\s+(\\d{1,2})\\s*(\\d{4})?/i);\nif (dm) {\n  const day = dm[1].padStart(2,'0');\n  const mon = String(months[dm[2].toLowerCase()]).padStart(2,'0');\n  const yr  = dm[3] || new Date().getFullYear();\n  specificDate = `${yr}-${mon}-${day}`;\n  if (intent === 'general_inquiry') intent = 'sales_query';\n} else if (md) {\n  const day = md[2].padStart(2,'0');\n  const mon = String(months[md[1].toLowerCase()]).padStart(2,'0');\n  const yr  = md[3] || new Date().getFullYear();\n  specificDate = `${yr}-${mon}-${day}`;\n  if (intent === 'general_inquiry') intent = 'sales_query';\n}\n\n// ══════════════════════════════════════════════════════════════\n// PRODUCT NAME extract (inventory only)\n// ══════════════════════════════════════════════════════════════\nlet productName = null;\nif (intent === 'inventory_check') {\n  const stripped = q\n    .replace(/\\b(inventory|stock|check|maal|available|konsa|product|kitna|ka|ki|show|dekho|batao|karo|lao|dy|do|bta|bhi|detail|price|info|of|the|mujhe|mujhy|mjy)\\b/gi, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n  if (stripped.length >= 2) productName = stripped;\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    intent,\n    confidence:   0.9,\n    timePeriod,\n    specificDate,\n    productName,\n    entities: { time_period: timePeriod, specific_date: specificDate, product_name: productName }\n  }\n}];"
+      },
+      "id": "98560c5c-cb00-4224-ac7e-33fedcf838e5",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1632,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.intent }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "sales_query"
+            },
+            {
+              "value2": "inventory_check"
+            },
+            {
+              "value2": "report_request"
+            },
+            {
+              "value2": "general_inquiry"
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "e664ace7-ddc8-44b1-b07e-bc646f0b7235",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d  = $input.first().json;\nconst tp = (d.timePeriod || 'today').toLowerCase();\nconst specificDate = d.specificDate || null;\n\nconst now = new Date();\n\nlet startDate, endDate, label;\n\n// ── Specific date — highest priority ──────────────────────────\nif (specificDate && /^\\d{4}-\\d{2}-\\d{2}$/.test(specificDate)) {\n  startDate = specificDate;\n  const next = new Date(specificDate); next.setDate(next.getDate() + 1);\n  endDate = next.toISOString().split('T')[0];\n  label = specificDate;\n}\n// ── Standard periods ──────────────────────────────────────────\nelse if (tp.includes('yesterday')) {\n  const y = new Date(now); y.setDate(y.getDate() - 1);\n  startDate = y.toISOString().split('T')[0];\n  const nxt = new Date(now);\n  endDate = nxt.toISOString().split('T')[0];\n  label = 'Yesterday';\n} else if (tp.includes('last week')) {\n  const lw = new Date(now); lw.setDate(lw.getDate() - 7);\n  startDate = lw.toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'Last 7 Days';\n} else if (tp.includes('last month')) {\n  const lm = new Date(now); lm.setMonth(lm.getMonth() - 1);\n  startDate = lm.toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'Last 30 Days';\n} else if (tp.includes('week')) {\n  const dow = now.getDay() || 7;\n  const mon = new Date(now); mon.setDate(now.getDate() - dow + 1);\n  startDate = mon.toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'This Week';\n} else if (tp.includes('month')) {\n  startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'This Month';\n} else {\n  // Today\n  startDate = now.toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'Today';\n}\n\nreturn [{ json: { ...d, startDate, endDate, periodLabel: label } }];"
+      },
+      "id": "e20cd170-96ba-487b-881a-3b84ba8eed01",
+      "name": "Prepare Sales Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders?business_id=eq.{{ $json.businessId }}&date_created=gte.{{ $json.startDate }}&date_created=lt.{{ $json.endDate }}&status=in.(completed,processing)&select=wc_order_id,total,total_refunded,currency,status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e84325dd-ea46-438e-a8a7-d5dc26ffc3b1",
+      "name": "Query Sales Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -960,
+        816
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw   = $input.first().json;\nconst rows  = Array.isArray(raw.body) ? raw.body : (Array.isArray(raw) ? raw : []);\nconst d     = $('Prepare Sales Query').first().json;\nconst ctx   = $('Parse Classification').first().json;\nconst period   = d.periodLabel || 'Today';\nconst currency = rows[0]?.currency || 'PKR';\n\nconst totalOrders   = rows.length;\nconst totalSales    = rows.reduce((s, r) => s + (parseFloat(r.total)||0) - (parseFloat(r.total_refunded)||0), 0);\nconst grossRevenue  = rows.reduce((s, r) => s + (parseFloat(r.total)||0), 0);\nconst totalRefunded = rows.reduce((s, r) => s + (parseFloat(r.total_refunded)||0), 0);\nconst avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;\nconst fmt = n => n.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n\nlet response;\nif (totalOrders === 0) {\n  response = `📊 *Sales — ${period}*\\n\\nNo orders found for this period.`;\n} else {\n  response = [\n    `📊 *Sales Analytics — ${period}*`,\n    ``,\n    `✅ Total Orders:    ${totalOrders}`,\n    `💰 Net Sales:       ${currency} ${fmt(totalSales)}`,\n    `📦 Gross Revenue:   ${currency} ${fmt(grossRevenue)}`,\n    totalRefunded > 0 ? `↩️ Refunded:        ${currency} ${fmt(totalRefunded)}` : null,\n    `📈 Avg Order Value: ${currency} ${fmt(avgOrderValue)}`\n  ].filter(Boolean).join('\\n');\n}\n\nreturn [{ json: { ...ctx, ...d, response } }];"
+      },
+      "id": "be99509d-2d66-42eb-97af-7b0358d24e12",
+      "name": "Format Sales Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ (() => { const base = 'https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_products?business_id=eq.' + $json.businessId; const pn = $json.productName; if (pn) {   const words = pn.trim().split(/\\s+/).filter(w => w.length >= 2);   const filters = words.map(w => 'name=ilike.*' + encodeURIComponent(w) + '*').join('&');   return base + '&' + filters + '&select=name,sku,stock_quantity,stock_status,price&order=stock_quantity.asc.nullslast&limit=10'; } else {   return base + '&stock_quantity=gte.0&stock_quantity=lte.5&select=name,sku,stock_quantity,stock_status,price&order=stock_quantity.asc.nullslast&limit=100'; } })() }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "da7b52ff-e001-4cf4-8241-efd4841a26a3",
+      "name": "Query Inventory Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -960,
+        1008
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw  = $input.first().json;\nlet rows = Array.isArray(raw.body) ? raw.body : (Array.isArray(raw) ? raw : []);\nconst d  = $('Parse Classification').first().json;\nconst productName = d.productName || null;\n\nif (productName) {\n  const words = productName.toLowerCase().trim().split(/\\s+/).filter(w => w.length >= 2);\n  rows = rows.filter(p => {\n    const n = (p.name || '').toLowerCase();\n    return words.every(w => n.includes(w));\n  });\n} else {\n  rows = rows.filter(p => (p.stock_quantity ?? 0) <= 5);\n}\n\nif (rows.length === 0) {\n  const msg = productName\n    ? `📦 *Inventory Search*\\n\\nNo product found matching: \"${productName}\"`\n    : `📦 *Inventory*\\n\\nAll products are well stocked. No items with stock 0-5.`;\n  return [{ json: { ...d, response: msg } }];\n}\n\nconst lines = rows.map(p => {\n  const qty = p.stock_quantity ?? 0;\n  const dot = qty === 0 ? '🔴' : (qty <= 5 ? '🟡' : '🟢');\n  return `${dot} ${p.name}\\n   Stock: ${qty}  |  Price: PKR ${p.price || '—'}`;\n});\n\nconst title = productName\n  ? `📦 *Product Search: \"${productName}\"*`\n  : `📦 *Low Stock Alert (0-5 units)*`;\n\nreturn [{ json: { ...d, response: `${title}\\n\\n${lines.join('\\n\\n')}` } }];"
+      },
+      "id": "3cec400e-55d8-4df3-ae9c-55db2b4a5124",
+      "name": "Format Inventory Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        1008
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d  = $input.first().json;\nconst tp = (d.timePeriod || 'this week').toLowerCase();\n\nlet startDate, endDate, label;\nconst now = new Date();\n\nif (tp.includes('last month')) {\n  const lm = new Date(now); lm.setMonth(lm.getMonth() - 1);\n  startDate = new Date(lm.getFullYear(), lm.getMonth(), 1).toISOString().split('T')[0];\n  endDate   = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];\n  label = 'Last Month';\n} else if (tp.includes('month')) {\n  startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'This Month';\n} else if (tp.includes('last week')) {\n  const lw = new Date(now); lw.setDate(lw.getDate() - 7);\n  startDate = lw.toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'Last 7 Days';\n} else {\n  // This week — Monday to today\n  const dow = now.getDay() || 7;\n  const mon = new Date(now); mon.setDate(now.getDate() - dow + 1);\n  startDate = mon.toISOString().split('T')[0];\n  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);\n  endDate = tomorrow.toISOString().split('T')[0];\n  label = 'This Week';\n}\n\nreturn [{ json: { ...d, startDate, endDate, periodLabel: label } }];"
+      },
+      "id": "2950d956-5fc2-4aa2-b724-72efd1d777ad",
+      "name": "Prepare Report Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_order_items?business_id=eq.{{ $json.businessId }}&order_date=gte.{{ $json.startDate }}&order_date=lt.{{ $json.endDate }}&order_status=not.in.(cancelled,refunded,failed)&select=product_name,quantity,total&limit=500",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "d82dd2ab-b0f2-4f3e-9a25-4ee16960bb65",
+      "name": "Query Report Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -960,
+        1200
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw  = $input.first().json;\nconst rows = Array.isArray(raw.body) ? raw.body : (Array.isArray(raw) ? raw : []);\nconst d    = $('Prepare Report Query').first().json;\nconst ctx  = $('Parse Classification').first().json;\nconst period = d.periodLabel || 'This Week';\n\nif (rows.length === 0) {\n  return [{ json: { ...ctx, ...d, response: `📈 *Report — ${period}*\\n\\nNo sales data found for this period.` } }];\n}\n\nconst map = {};\nfor (const r of rows) {\n  const n = r.product_name || 'Unknown';\n  if (!map[n]) map[n] = { units: 0, revenue: 0 };\n  map[n].units   += parseInt(r.quantity) || 0;\n  map[n].revenue += parseFloat(r.total)  || 0;\n}\n\nconst sorted = Object.entries(map).sort((a, b) => b[1].units - a[1].units).slice(0, 5);\nconst totalRevenue = Object.values(map).reduce((s, v) => s + v.revenue, 0);\nconst lines = sorted.map(([n, v], i) =>\n  `${i+1}. ${n}\\n   Units: ${v.units}  |  Revenue: PKR ${v.revenue.toFixed(2)}`\n);\n\nconst response = `📈 *Sales Report — ${period}*\\n💰 Total Revenue: PKR ${totalRevenue.toFixed(2)}\\n\\n🏆 *Top Products:*\\n${lines.join('\\n\\n')}`;\nreturn [{ json: { ...ctx, ...d, response } }];"
+      },
+      "id": "5a466cdd-dec1-41d3-83fa-81069b078259",
+      "name": "Format Report Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst response = `👋 Hello ${d.username || 'there'}!\\n\\nI can help you with:\\n• 📊 Sales — \"What are my sales today?\"\n• 📦 Inventory — \"Check my inventory\"\n• 📈 Reports — \"Show this week's report\"\n\nJust type or send a voice message!`;\nreturn [{ json: { ...d, response } }];"
+      },
+      "id": "c045960c-05bd-4e91-ba75-6a18ee699aa1",
+      "name": "Handle General Inquiry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// $input already contains the output from whichever format node ran.\n// Every format node spreads full context (chatId, businessId, intent, etc.)\nconst d = $input.first().json;\nconst elapsed = d.startTime ? Date.now() - d.startTime : null;\n\nreturn [{\n  json: {\n    response:         d.response         || 'Sorry, I could not process your request.',\n    chatId:           d.chatId           || '',\n    userId:           d.userId           || '',\n    messageId:        d.messageId        || '',\n    messageType:      d.messageType      || 'text',\n    businessId:       d.businessId       || null,\n    rawText:          d.textContent      || null,\n    transcription:    d.transcription    || null,\n    intent:           d.intent           || 'general_inquiry',\n    entities:         d.entities         || {},\n    processingTimeMs: elapsed\n  }\n}];"
+      },
+      "id": "74836763-7b82-4f78-95d9-91ab6bd279f9",
+      "name": "Merge Responses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.response }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "c8e2d388-1b7f-430b-b56c-c75a739c9600",
+      "name": "Send Telegram Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -288,
+        1104
+      ],
+      "webhookId": "9f0e17ea-17a8-4100-9ed9-bfc028506ee1",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/telegram_messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_id: $json.businessId, telegram_message_id: $json.messageId, telegram_chat_id: $json.chatId, telegram_user_id: $json.userId, message_type: $json.messageType, raw_text: $json.rawText, transcription: $json.transcription, intent: $json.intent, entities: $json.entities, response_text: $json.response, response_sent: true, processing_time_ms: $json.processingTimeMs }) }}",
+        "options": {}
+      },
+      "id": "9b5a0d52-3053-402f-ad7a-a7db1972ae30",
+      "name": "Log to telegram_messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -64,
+        1104
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Extract Message Data').first().json.chatId }}",
+        "text": "❌ Your Telegram account is not registered with BizFlow.\n\nPlease register your business first and link this Telegram chat ID.",
+        "additionalFields": {}
+      },
+      "id": "95982a63-2db2-4bbd-ad33-e956e16bf1c3",
+      "name": "Send Not Registered",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -2752,
+        1136
+      ],
+      "webhookId": "d69c2b81-8751-49dd-9fa9-aacaafd6d45f",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst text = (d.textContent || d.text || '').trim().toUpperCase();\nconst isSendEmail = text === 'SEND EMAIL' || text.includes('SEND EMAIL');\nreturn [{ json: { ...d, isSendEmail } }];"
+      },
+      "id": "e351a1c5-3b57-41d2-80a8-499885218637",
+      "name": "Check SEND EMAIL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3888,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "se-cond-01",
+              "leftValue": "={{ $json.isSendEmail }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cb90bca4-2a4a-4bb2-86d1-fcebb22a16ef",
+      "name": "Is SEND EMAIL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3648,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/inventory_alerts?telegram_sent=eq.true&email_sent=eq.false&alert_date=eq.{{ new Date().toISOString().split('T')[0] }}&select=*",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0c7849a8-baeb-47ff-ab82-82ae9c8d1ef3",
+      "name": "Fetch Pending Inventory Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3424,
+        560
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/suppliers?select=name,email&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1befd8cf-6caa-4e4d-9396-e584940e02ad",
+      "name": "Fetch Supplier",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3200,
+        560
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const alertsRaw = $('Fetch Pending Inventory Alerts').all().map(i => i.json);\nconst supplierRaw = $('Fetch Supplier').all().map(i => i.json);\nconst chatId = $('Check SEND EMAIL').first().json.chatId;\n\n// alertsRaw directly array of items hai\nconst alerts = alertsRaw.filter(a => a.business_id); // valid rows filter karo\n\nif (alerts.length === 0) {\n  return [{ json: { skip: true, chatId, noAlerts: true } }];\n}\n\nconst supplier = supplierRaw[0] || { name: 'Supplier', email: 'supplier@example.com' };\nconst today = new Date().toISOString().split('T')[0];\nconst businessId = alerts[0].business_id;\n\nconst outOfStock = alerts.filter(a => a.status === 'out_of_stock');\nconst lowStock = alerts.filter(a => a.status === 'low');\n\nlet emailBody = `Dear ${supplier.name},\\n\\n`;\nemailBody += `We need to reorder the following products:\\n\\n`;\n\nif (outOfStock.length > 0) {\n  emailBody += `OUT OF STOCK:\\n`;\n  outOfStock.forEach((p, i) => {\n    emailBody += `${i+1}. ${p.product_name} — Please send ASAP\\n`;\n  });\n  emailBody += `\\n`;\n}\n\nif (lowStock.length > 0) {\n  emailBody += `LOW STOCK:\\n`;\n  lowStock.forEach((p, i) => {\n    emailBody += `${i+1}. ${p.product_name} — Current: ${p.stock_quantity} units\\n`;\n  });\n  emailBody += `\\n`;\n}\n\nemailBody += `Please confirm availability and expected delivery date.\\n\\nRegards,\\nBizFlow AI`;\n\nreturn [{\n  json: {\n    businessId,\n    supplierEmail: supplier.email,\n    supplierName: supplier.name,\n    emailSubject: `Reorder Required — ${today}`,\n    emailBody,\n    totalItems: alerts.length,\n    chatId,\n    skip: false\n  }\n}];"
+      },
+      "id": "41331cc6-9029-4a88-b0b0-3635eb6e2127",
+      "name": "Build Supplier Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2976,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "ha-cond-01",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "777764f3-2c4a-46fb-8c41-ad12dadcd2a9",
+      "name": "Has Pending Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2768,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "⚠️ Koi pending inventory alert nahi hai aaj ke liye.",
+        "additionalFields": {}
+      },
+      "id": "518f3a33-5b83-4ef0-b329-3571bd2fa626",
+      "name": "No Alerts Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -2528,
+        464
+      ],
+      "webhookId": "850c4669-2462-49f1-82cb-e4b1570ad063",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.supplierEmail }}",
+        "subject": "={{ $json.emailSubject }}",
+        "message": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "f16e9ac6-f891-41d0-98a9-afc346d4a97a",
+      "name": "Send Supplier Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -2544,
+        608
+      ],
+      "webhookId": "5d431e81-1ce8-4253-8167-107909797d43",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "szgMzuuxMtJYmOgG",
+          "name": "Gmail account 4"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/inventory_alerts?business_id=eq.{{ $('Build Supplier Email').first().json.businessId }}&alert_date=eq.{{ new Date().toISOString().split('T')[0] }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"email_sent\": true, \"email_confirmed\": true}",
+        "options": {}
+      },
+      "id": "7156eaa6-9177-40d3-97ea-e10b5eb30c86",
+      "name": "Update Inventory Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2320,
+        608
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Build Supplier Email').first().json.chatId }}",
+        "text": "={{ `✅ *Email Bej Di Gai Hai!*\\n\\n📧 Supplier: ${$('Build Supplier Email').first().json.supplierName}\\n📮 Email: ${$('Build Supplier Email').first().json.supplierEmail}\\n📦 Total Items: ${$('Build Supplier Email').first().json.totalItems}\\n\\n_BizFlow AI_` }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "83a4f3e5-c629-4807-9968-ece97790066c",
+      "name": "Email Sent Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -2096,
+        608
+      ],
+      "webhookId": "b7f93d14-f892-4fb9-94b9-56459c45cc6f",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message Data": {
+      "main": [
+        [
+          {
+            "node": "Check SEND EMAIL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Business": {
+      "main": [
+        [
+          {
+            "node": "Process Business Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Business Lookup": {
+      "main": [
+        [
+          {
+            "node": "Business Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business Valid?": {
+      "main": [
+        [
+          {
+            "node": "Detect Input Type",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Not Registered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Input Type": {
+      "main": [
+        [
+          {
+            "node": "Get Voice File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Text Directly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Voice File": {
+      "main": [
+        [
+          {
+            "node": "Transcribe with Whisper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe with Whisper": {
+      "main": [
+        [
+          {
+            "node": "Process Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Transcription": {
+      "main": [
+        [
+          {
+            "node": "Classify Intent (GPT-4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Text Directly": {
+      "main": [
+        [
+          {
+            "node": "Classify Intent (GPT-4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Intent (GPT-4)": {
+      "main": [
+        [
+          {
+            "node": "Parse Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "node": "Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Intent": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sales Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Query Inventory Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Report Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle General Inquiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sales Query": {
+      "main": [
+        [
+          {
+            "node": "Query Sales Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Sales Data": {
+      "main": [
+        [
+          {
+            "node": "Format Sales Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Sales Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Inventory Data": {
+      "main": [
+        [
+          {
+            "node": "Format Inventory Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Inventory Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Report Query": {
+      "main": [
+        [
+          {
+            "node": "Query Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Report Data": {
+      "main": [
+        [
+          {
+            "node": "Format Report Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Report Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle General Inquiry": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Responses": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Reply": {
+      "main": [
+        [
+          {
+            "node": "Log to telegram_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check SEND EMAIL": {
+      "main": [
+        [
+          {
+            "node": "Is SEND EMAIL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is SEND EMAIL?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pending Inventory Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pending Inventory Alerts": {
+      "main": [
+        [
+          {
+            "node": "Fetch Supplier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Supplier": {
+      "main": [
+        [
+          {
+            "node": "Build Supplier Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Supplier Email": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Alerts?": {
+      "main": [
+        [
+          {
+            "node": "No Alerts Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Supplier Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Supplier Email": {
+      "main": [
+        [
+          {
+            "node": "Update Inventory Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Inventory Log": {
+      "main": [
+        [
+          {
+            "node": "Email Sent Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "d7db8d75-aeac-425d-ba06-7c98e00ce2d9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "2sqMwyaba2Qg43XUBHlZh",
+  "tags": []
+}
