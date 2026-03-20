@@ -1,0 +1,790 @@
+{
+  "name": "FINAL_7WF_Chatbot_FullCapture",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chatbot-query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "311580a5-fc1c-4b31-9cf6-7b2844aee3f0",
+      "name": "Chatbot Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -672,
+        -1296
+      ],
+      "webhookId": "chatbot-product-query-v1"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json;\nconst body = raw.body || raw;\n\nconst message     = String(body.message || body.query || body.text || '').trim();\nconst business_id = String(body.business_id || '').trim();\nconst session_id  = String(body.session_id || Date.now()).trim();\nconst userAgent   = String(body.user_agent || body.userAgent || '').toLowerCase();\nconst ip          = String(body.ip || body.client_ip || '').trim();\n\nif (!message)     return [{ json: { valid: false, error: 'Message is required' } }];\nif (!business_id) return [{ json: { valid: false, error: 'business_id is required' } }];\n\nconst q = message.toLowerCase().trim();\n\n// ════════════════════════════════════════════════════════════\n// 🤖 BOT / FAKE QUERY DETECTION\n// ════════════════════════════════════════════════════════════\nlet isFake     = false;\nlet fakeReason = null;\nlet fakeScore  = 0; // jitna zyada = utna zyada bot\n\n// ── 1. Message bahut chota ya meaningless ───────────────────\nif (message.length < 2) {\n  isFake = true; fakeReason = 'too_short';\n}\n\n// ── 2. Sirf numbers/symbols — no real query ─────────────────\nif (/^[\\d\\s\\.\\-\\+\\*\\/\\=\\!\\@\\#\\$\\%\\^&]+$/.test(message) && message.length < 8) {\n  fakeScore += 30;\n}\n\n// ── 3. Repeated characters — asdasd, aaaa, 1234 ────────────\nif (/(.)\\1{3,}/.test(message) && message.length < 20) {\n  fakeScore += 40; // \"aaaaaa\" or \"111111\"\n}\nif (/^(asdf|qwer|zxcv|test|abc|xyz|asd|hello|hi|hey|yo|ok|okay)/i.test(message)) {\n  fakeScore += 20;\n}\n\n// ── Phone number? Never fake ────────────────────────────────\nconst hasPhone = /(\\+92|0092|03\\d{9}|\\+\\d{10,14})/.test(message);\nif (hasPhone) {\n  // Phone number = real human, skip ALL bot checks\n  fakeScore = 0; isFake = false;\n}\n\n// ── 4. Known bot/spam patterns ──────────────────────────────────\nconst botPatterns = [\n  /^(test|testing|check|ping|hello|hi there|hey|yo|ok|okay|lol|haha)$/i,\n  /^(\\d+)$/,              // sirf number like \"123\"\n  /^[a-z]{1,2}$/i,        // single/double letter \"a\" \"ab\"\n  /<script|javascript:|onclick|onerror|alert\\(|eval\\(/i,  // XSS\n  /select\\s+\\*|drop\\s+table|insert\\s+into|union\\s+select/i, // SQL injection\n  /\\b(viagra|casino|loan|crypto|bitcoin|invest now)\\b/i,    // spam\n];\nfor (const pat of botPatterns) {\n  if (pat.test(message)) { fakeScore += 40; break; }\n}\n\n// ── 5. Bot user agents ───────────────────────────────────────\nconst botAgents = ['googlebot','bingbot','crawler','spider','scraper',\n  'curl','wget','python-requests','postman','insomnia'];\nif (botAgents.some(b => userAgent.includes(b))) {\n  fakeScore += 50;\n}\n\n// ── 6. Bahut tez queries — same session mein 1 second se kam ─\n// (session_id Unix timestamp hai)\n// Agar session_id difference < 3 seconds = bot\n// Note: yeh next level check hai, abhi flag karo\nconst tsNow = Date.now();\nconst tsSession = parseInt(session_id) || 0;\nconst ageSec = tsSession > 1000000000000 ? (tsNow - tsSession) / 1000 : 999;\nif (ageSec < 2 && ageSec > 0) {\n  fakeScore += 30; // query bahut tezi se aayi\n}\n\n// ── 7. Known test phrases (aap khud test kar rahi thi) ───────\nconst testPhrases = [\n  /^(test|testing \\d+|test query|check|ping)$/i,\n  /^(hello|hi|hey|assalam|salam)$/i,   // sirf greeting, koi query nahi\n];\nfor (const pat of testPhrases) {\n  if (pat.test(message.trim())) { fakeScore += 15; }\n}\n\n// ── Final fake decision ──────────────────────────────────────\nif (fakeScore >= 40) {\n  isFake = true;\n  fakeReason = fakeReason || `suspicious_score_${fakeScore}`;\n}\n\n// ── Flag but don't block — still answer, just don't save as lead\nconst isLikelyTest = fakeScore >= 20 && fakeScore < 40;\n\n// ════════════════════════════════════════════════════════════\n// 📞 CONTACT DETECTION\n// ════════════════════════════════════════════════════════════\nconst phoneRegex = /(\\+92|0092|03)\\d{9,10}|03\\d{2}[-\\s]?\\d{7}/;\nconst phoneMatch = message.match(phoneRegex);\nconst detectedPhone = phoneMatch ? phoneMatch[0].replace(/[\\s-]/g,'') : null;\n\nconst namePatterns = [\n  /(?:mera naam|my name is|naam hai|i am|main hun|میرا نام)\\s+([a-zA-Z\\u0600-\\u06FF]{2,}\\s*[a-zA-Z\\u0600-\\u06FF]{0,})/i,\n  /^([A-Z][a-z]+\\s+[A-Z][a-z]+)$/,\n];\nlet detectedName = null;\nfor (const pat of namePatterns) {\n  const m = message.match(pat);\n  if (m && m[1]) { detectedName = m[1].trim(); break; }\n}\n\nconst isContactSubmission = !!(detectedPhone || detectedName) &&\n  (detectedPhone || q.includes('naam') || /^[a-zA-Z\\s]{3,25}$/.test(message.trim()));\n\n// ════════════════════════════════════════════════════════════\n// 🎯 INTENT DETECTION\n// ════════════════════════════════════════════════════════════\nlet intent = 'search';\n\nif (isContactSubmission) {\n  intent = 'contact_submission';\n} else if (q.includes('sale') || q.includes('discount') || q.includes('offer') ||\n    q.includes('sasta') || q.includes('cheap') || q.includes('saving')) {\n  intent = 'sale';\n} else if (q.includes('price') || q.includes('cost') || q.includes('rate') ||\n           q.includes('قیمت') || q.includes('how much') || q.includes('kitna') ||\n           q.includes('kitni') || q.includes('charges')) {\n  intent = 'price';\n} else if (q.includes('available') || q.includes('in stock') ||\n           q.includes('milega') || q.includes('hai kya') ||\n           q.includes('stock mein') || q.includes('dastiyab')) {\n  intent = 'stock';\n} else if (q.includes('categor') || q.includes('qisam')) {\n  intent = 'category';\n}\n\n// ════════════════════════════════════════════════════════════\n// 🔑 KEYWORD EXTRACTION\n// ════════════════════════════════════════════════════════════\nconst stopWords = new Set([\n  'what','is','the','price','of','do','you','have','can','i','get','a',\n  'show','me','tell','about','kya','hai','hain','ka','ki','ke','mujhe',\n  'batao','dikhao','sale','discount','stock','available','how','much',\n  'any','your','all','and','mein','se','ko','aur','ya','milega','milegi',\n  'chahiye','please','plz','bata','dena','dedo','karo','hoga','hogi',\n  'konsa','konsi','konse','wala','wali','wale','per','bhi','toh','yeh',\n  'woh','iss','unn','inn','tha','thi','the','hai','hain','hua','hui'\n]);\n\nconst multiWordProducts = [\n  'olive oil','coconut oil','mustard oil','almond oil','hair oil',\n  'cooking oil','black seed','kalonji oil','fish oil',\n  'honey salajeet','ashraf naturals','hamdard','qarshi','johar joshanda'\n];\n\nlet keywords = [];\nconst qClean = q.replace(/[?!.,؟،]/g, ' ');\nfor (const mw of multiWordProducts) {\n  if (qClean.includes(mw)) {\n    keywords.push(mw.split(' ')[0]);\n    const second = mw.split(' ')[1];\n    if (second && second.length > 2) keywords.push(second);\n  }\n}\nconst singleWords = qClean.split(/\\s+/).map(w=>w.trim())\n  .filter(w => w.length > 2 && !stopWords.has(w));\nfor (const w of singleWords) {\n  if (!keywords.some(k => k.includes(w) || w.includes(k))) keywords.push(w);\n}\nkeywords = [...new Set(keywords)].slice(0, 5);\n\nreturn [{\n  json: {\n    valid: true,\n    message,\n    business_id,\n    session_id,\n    intent,\n    keywords,\n    q,\n    detectedPhone,\n    detectedName,\n    isContactSubmission,\n    // Bot detection results\n    isFake,\n    isLikelyTest,\n    fakeReason,\n    fakeScore\n  }\n}];\n"
+      },
+      "id": "67d7edc8-b8d1-4ae9-80b1-1723f1e7c247",
+      "name": "Validate & Classify Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        -1296
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "91822446-0e0e-415d-ad04-26db6b50c84a",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -1296
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "64e28ec8-ec3e-432d-951d-b45afbd9b6b0",
+      "name": "Return 400 Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { intent, business_id, keywords } = $json;\nconst base = 'https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_products';\nconst fields = 'name,price,regular_price,sale_price,stock_status,stock_quantity,description,short_description,categories,images';\n\nconst kSearch = (kws, limit=25) => {\n  if (!kws || kws.length === 0)\n    return `${base}?business_id=eq.${business_id}&select=${fields}&limit=30`;\n  \n  // Use FIRST keyword only for best match — multi-keyword OR causes too broad results\n  const primaryKw = kws[0];\n  const t = `name.ilike.*${primaryKw}*,short_description.ilike.*${primaryKw}*,description.ilike.*${primaryKw}*`;\n  \n  // If 2+ keywords, add second as OR too\n  const extraTerms = kws.slice(1,3).map(kw =>\n    `name.ilike.*${kw}*,short_description.ilike.*${kw}*`\n  );\n  const allTerms = [t, ...extraTerms].join(',');\n  \n  return `${base}?business_id=eq.${business_id}&or=(${allTerms})&select=${fields}&order=name.asc&limit=${limit}`;\n};\n\nlet url;\nif (intent === 'sale') {\n  if (keywords.length > 0) {\n    const t = keywords.slice(0,2).map(kw=>`name.ilike.*${kw}*`).join(',');\n    url = `${base}?business_id=eq.${business_id}&sale_price=not.is.null&or=(${t})&select=${fields}&limit=20`;\n  } else {\n    url = `${base}?business_id=eq.${business_id}&sale_price=not.is.null&select=${fields}&limit=30`;\n  }\n} else {\n  url = kSearch(keywords, 25);\n}\n\nreturn [{ json: { ...($('Validate & Classify Intent').first().json), supabase_url: url } }];"
+      },
+      "id": "cf78c6dd-8198-4fcc-a6ed-2f8c0769f8b3",
+      "name": "Build Supabase Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -1296
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.supabase_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a32a73ba-782b-4d4c-9fb9-ea3d31dc7c68",
+      "name": "Fetch Products from Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        -1296
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const intent_data = $('Validate & Classify Intent').first().json;\n\nconst products = $input.all().map(item => item.json);\n\nif (products.length === 0) {\n  return [{\n    json: {\n      ...intent_data,\n      product_context: 'No products found matching the query.',\n      product_count: 0\n    }\n  }];\n}\n\nfunction stripHtml(html) {\n  return (html || '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n')\n    .replace(/<[^>]*>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/\\s\\s+/g, ' ')\n    .trim();\n}\n\nconst formatted = products.map(p => {\n  const cats = (p.categories || []).map(c => c.name || c).join(', ');\n  let lines = [];\n\n  lines.push(`PRODUCT: ${p.name}`);\n\n  if (p.sale_price && parseFloat(p.sale_price) > 0 && parseFloat(p.sale_price) !== parseFloat(p.regular_price)) {\n    const discount = p.regular_price && parseFloat(p.regular_price) > 0\n      ? Math.round(((parseFloat(p.regular_price) - parseFloat(p.sale_price)) / parseFloat(p.regular_price)) * 100)\n      : 0;\n    lines.push(`Price: Rs.${p.sale_price} (ON SALE! Was Rs.${p.regular_price} — ${discount}% off)`);\n  } else if (p.price) {\n    lines.push(`Price: Rs.${p.price}`);\n  }\n\n  const stockLabel = p.stock_status === 'instock' ? 'In Stock' : 'Out of Stock';\n  const qty = p.stock_quantity > 0 ? ` (${p.stock_quantity} units)` : '';\n  lines.push(`Availability: ${stockLabel}${qty}`);\n\n  if (cats) lines.push(`Category: ${cats}`);\n\n  const shortDesc = stripHtml(p.short_description);\n  if (shortDesc) lines.push(`Summary: ${shortDesc.substring(0, 400)}`);\n\n  const longDesc = stripHtml(p.description);\n  if (longDesc && longDesc !== shortDesc) {\n    lines.push(`Details: ${longDesc.substring(0, 800)}`);\n  }\n\n  return lines.join('\\n');\n}).join('\\n\\n---\\n\\n');\n\nreturn [{\n  json: {\n    ...intent_data,\n    product_context: formatted,\n    product_count: products.length\n  }\n}];"
+      },
+      "id": "2f7bd276-e526-41bc-849e-134b938a3080",
+      "name": "Format Products for Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -1296
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: $('Extract OpenAI Reply').first().json.success, reply: $('Extract OpenAI Reply').first().json.reply, intent: $('Extract OpenAI Reply').first().json.intent, products_found: $('Extract OpenAI Reply').first().json.products_found, session_id: $('Extract OpenAI Reply').first().json.session_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "f4bbf87f-609e-4e14-b60a-275362ff9444",
+      "name": "Return Answer to User",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2816,
+        -1296
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a helpful store assistant for SK Natural — a Pakistani health & grocery store. Answer ONLY using the product data provided.\n\nRules:\n1. Reply in the SAME language as the customer (Urdu→Urdu, English→English, Mix→Mix)\n2. Always mention exact prices with Rs. prefix\n3. If a product is on sale, highlight the discount\n4. Clearly state stock status (In Stock / Out of Stock)\n5. If out of stock, suggest similar available products\n6. Be concise and friendly\n7. Never make up products or prices not in the data\n\nCONTACT REQUEST RULE (Very Important):\n- If customer asks about price OR stock OR bulk/wholesale:\n  After giving the answer, ALWAYS add this at the end:\n  \n  [If Urdu/Mix]: \"\\n\\n📞 *Special price ya bulk order ke liye apna WhatsApp number bhejein — hum aapko personally assist karenge!*\"\n  [If English]: \"\\n\\n📞 *For special pricing or bulk orders, please share your WhatsApp number — we'll assist you personally!*\"\n\n- If customer shares a phone number or name: \n  Reply warmly: \"Shukriya! [Name] ji, hamare team member aapko jald contact karenge. Kya aur kuch poochna chahte hain?\"\n  [English]: \"Thank you! Our team will contact you shortly. Is there anything else you'd like to know?\"\n\n- Do NOT ask for contact info if customer is just browsing categories.",
+              "role": "system"
+            },
+            {
+              "content": "=Customer question: {{ $json.message }}\n\nStore products:\n{{ $json.product_context }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.3
+        }
+      },
+      "id": "04b89028-769d-4d11-a437-73ba8d479312",
+      "name": "OpenAI Chat — Generate Answer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        896,
+        -1296
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "PQfPyqdpbAK30RzL",
+          "name": "OpenAi account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst openaiResp = $input.first().json;\nconst intentData = $('Validate & Classify Intent').first().json;\nconst formatData = $('Format Products for Claude').first().json;\n\nlet reply = '';\ntry {\n  if (openaiResp.message && openaiResp.message.content) {\n    reply = openaiResp.message.content;\n  } else if (openaiResp.choices && openaiResp.choices[0]) {\n    reply = openaiResp.choices[0].message?.content || '';\n  } else if (openaiResp.text) {\n    reply = openaiResp.text;\n  } else if (openaiResp.content) {\n    reply = openaiResp.content;\n  } else {\n    reply = 'Sorry, I could not generate an answer. Please try again.';\n  }\n} catch(e) {\n  reply = 'Sorry, something went wrong. Please try again.';\n}\n\nconst q = (intentData.message || '').toLowerCase();\nconst kwList = ['olive oil','pomace','mustard oil','mustard','coconut oil','coconut','almond oil',\n  'almond','borges','italia','sasso','mundial','chia','til','honey','shehad','sidr',\n  'qarshi','johar','joshanda','hamdard','herb','masala','hair oil','cooking oil','ghee'];\nlet detectedProduct = null;\nfor (const kw of kwList) { if (q.includes(kw)) { detectedProduct = kw; break; } }\nif (!detectedProduct && intentData.keywords?.length > 0) detectedProduct = intentData.keywords[0];\n\n// Contact info from Validate node\nconst detectedPhone = intentData.detectedPhone || null;\nconst detectedName  = intentData.detectedName  || null;\nconst isContactSubmission = intentData.isContactSubmission || false;\n\n// If contact submitted — boost score\nconst contactBonus = detectedPhone ? 30 : 0;\n\nreturn [{\n  json: {\n    success: true,\n    reply,\n    intent: intentData.intent,\n    products_found: formatData.product_count || 0,\n    session_id: intentData.session_id,\n    detectedPhone,\n    detectedName,\n    isContactSubmission,\n    contactBonus,\n    searchLog: {\n      business_id: intentData.business_id,\n      query_text: intentData.message.substring(0, 500),\n      detected_product: detectedProduct,\n      detected_intent: intentData.intent,\n      products_found: formatData.product_count || 0,\n      session_id: intentData.session_id,\n      created_at: new Date().toISOString()\n    }\n  }\n}];\n"
+      },
+      "id": "69095e7f-c03b-449c-acb6-d676e80f5eb3",
+      "name": "Extract OpenAI Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        -1296
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/customer_search_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($('Score & Qualify Lead').first().json.searchLog) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "29d1fce3-5c6b-449c-b343-a32d4af0170a",
+      "name": "Log Customer Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2592,
+        -1392
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/business_profiles?business_id=eq.{{ $json.business_id }}&select=telegram_chat_id&limit=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "713053af-5920-430c-a4d9-d93067e20814",
+      "name": "Get Telegram Chat ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        -1200
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst scored = $('Score & Qualify Lead').first().json;\nlet raw;\ntry { raw = $input.first().json; } catch(e) { raw = {}; }\nconst biz = Array.isArray(raw) ? raw[0] : raw;\nconst chatId = biz?.telegram_chat_id || '6712600936';\nreturn [{ json: { ...scored, telegram_chat_id: String(chatId) } }];\n"
+      },
+      "id": "e6e5ebaf-02b7-47d6-a0bd-2c57f483a72e",
+      "name": "Merge Telegram ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2144,
+        -1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction cleanPhone(raw) {\n  if (!raw) return { phone: null, waNumber: null, waLink: null };\n  \n  // Remove spaces, dashes, dots, brackets\n  let phone = raw.replace(/[\\s\\-\\.()]/g, '');\n  \n  // Already has + — remove it for wa.me\n  if (phone.startsWith('+')) {\n    const waNumber = phone.slice(1);\n    return { phone: raw, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Pakistan: 03xxxxxxxxx → 923xxxxxxxxx\n  if (/^03\\d{9}$/.test(phone)) {\n    const waNumber = '92' + phone.slice(1);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Pakistan with 0092: 00923xxxxxxxxx\n  if (phone.startsWith('0092')) {\n    const waNumber = phone.slice(2);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Already has country code (10-15 digits, no leading 0)\n  // e.g. 923001234567, 447911123456, 12025551234\n  if (/^[1-9]\\d{9,14}$/.test(phone)) {\n    return { phone, waNumber: phone, waLink: `https://wa.me/${phone}` };\n  }\n  \n  // UAE: 05xxxxxxxx → 9715xxxxxxxx\n  if (/^05\\d{8}$/.test(phone)) {\n    const waNumber = '971' + phone.slice(1);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // UK: 07xxxxxxxxx → 447xxxxxxxxx\n  if (/^07\\d{9}$/.test(phone)) {\n    const waNumber = '44' + phone.slice(1);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // US/Canada: 10 digits starting with area code\n  if (/^[2-9]\\d{9}$/.test(phone)) {\n    const waNumber = '1' + phone;\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Fallback — use as-is\n  return { phone, waNumber: phone, waLink: `https://wa.me/${phone}` };\n}\n\nconst d = $input.first().json;\n\nif (!d.needsAlert) {\n  return [{ json: { ...d, alertSkipped: true } }];\n}\n\nconst { phone, waNumber, waLink } = cleanPhone(d.phone);\nconst emoji = d.phone ? '🔴🔥' : (d.priority === 'Hot' ? '🔴' : '🟡');\n\nlet msg = `${emoji} *New Hot Lead — SK Natural!*\\n\\n`;\nif (d.name)    msg += `👤 *Name:* ${d.name}\\n`;\nif (d.phone)   msg += `📞 *Phone:* ${d.phone}\\n`;\nif (waNumber)  msg += `🌍 *International:* +${waNumber}\\n`;\nmsg += `🛍️ *Interested in:* ${d.service || 'General'}\\n`;\nmsg += `💬 *Query:* \"${(d.query_text || '').substring(0,100)}\"\\n`;\nmsg += `\\n📊 *Score:* ${d.score}/100 — ${d.priority}\\n`;\nmsg += `✅ *Action:* ${d.recommended_action}\\n`;\nif (waLink) {\n  msg += `\\n👇 *EK CLICK MEIN WHATSAPP KARO:*\\n`;\n  msg += `${waLink}\\n`;\n}\nmsg += `\\n_BizFlow AI — ${new Date().toLocaleTimeString('en-PK')}_`;\n\nreturn [{ json: { ...d, telegramMsg: msg, waLink } }];\n"
+      },
+      "id": "d70f6682-186d-42f7-b1ef-b621abd71bdf",
+      "name": "Build Hot Lead Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2368,
+        -1200
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.telegram_chat_id || '6712600936' }}",
+        "text": "={{ $json.telegramMsg }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "6ae3db99-effa-4d95-b959-2c8e27938f84",
+      "name": "Send Hot Lead Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2592,
+        -1200
+      ],
+      "webhookId": "a39b5f6d-5173-4769-8a9e-6e364a42808c",
+      "credentials": {
+        "telegramApi": {
+          "id": "ituMiLuV9xHABDzV",
+          "name": "Telegram account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst data = $('Extract OpenAI Reply').first().json;\nconst intentData = $('Validate & Classify Intent').first().json;\n\n// ── Fake/Bot check — agar fake hai to save mat karo ──────────\nconst isFake       = intentData.isFake || false;\nconst isLikelyTest = intentData.isLikelyTest || false;\nconst fakeReason   = intentData.fakeReason || null;\nconst fakeScore_v  = intentData.fakeScore || 0;\n\nif (isFake) {\n  // Workflow continue karega — chatbot answer dega\n  // Lekin CRM mein save NAHI hoga (score -999 = skip signal)\n  return [{\n    json: {\n      business_id: intentData.business_id,\n      name: 'FAKE/BOT — Skipped',\n      service: 'bot',\n      priority: 'Cold',\n      score: -1,          // ← -1 = save mat karo\n      signals: `fake,${fakeReason}`,\n      ai_summary: `Bot/fake query detected. Reason: ${fakeReason}. Fake score: ${fakeScore_v}`,\n      recommended_action: 'Skip — automated or test query',\n      estimated_value: 0,\n      query_text: intentData.message,\n      session_id: intentData.session_id,\n      products_found: data.products_found || 0,\n      intent: 'fake',\n      created_at: new Date().toISOString(),\n      searchLog: data.searchLog,\n      reply: data.reply,\n      success: data.success,\n      needsAlert: false,\n      skipSave: true       // ← CRM save skip karo\n    }\n  }];\n}\n\nconst intent      = data.intent || 'search';\nconst message     = intentData.message || '';\nconst keywords    = intentData.keywords || [];\nconst productsFound = data.products_found || 0;\nconst sessionId   = data.session_id || '';\nconst businessId  = intentData.business_id || '';\nconst detectedPhone = data.detectedPhone || null;\nconst detectedName  = data.detectedName  || null;\nconst q = message.toLowerCase();\n\nlet score = 0;\nlet signals = [];\n\n// ── BASE SCORE — har query ki minimum value ──────────────────\n// Koi bhi chatbot par aaya = already interested\nscore += 20;\nsignals.push('chatbot_visitor');\n\n// ── CONTACT INFO ─────────────────────────────────────────────\nif (detectedPhone) { score += 40; signals.push('phone_shared'); }\nif (detectedName)  { score += 10; signals.push('name_shared'); }\n\n// ── INTENT SCORING ───────────────────────────────────────────\n// Price poochna = buying intent\nif (intent === 'price') {\n  score += 25;\n  signals.push('price_inquiry');\n}\n// Stock check = ready to buy\nelse if (intent === 'stock') {\n  score += 20;\n  signals.push('stock_check');\n}\n// Sale/discount = price sensitive buyer\nelse if (intent === 'sale') {\n  score += 15;\n  signals.push('sale_interest');\n}\n// contact_submission handled separately\nelse if (intent === 'contact_submission') {\n  score += 30;\n  signals.push('contact_submission');\n}\n// Category browse = early stage\nelse {\n  score += 5;\n  signals.push('product_browse');\n}\n\n// ── KEYWORD QUALITY — kya specific product maanga? ──────────\n// Specific product name = serious shopper\nif (keywords.length >= 1) { score += 10; signals.push('specific_product'); }\nif (keywords.length >= 2) { score += 5;  signals.push('multi_keyword'); }\n\n// ── PRODUCTS FOUND — product actually available hai ─────────\nif (productsFound >= 1) { score += 10; signals.push('product_available'); }\nif (productsFound >= 3) { score += 5;  signals.push('multiple_options'); }\n\n// ── HIGH INTENT SIGNALS ──────────────────────────────────────\n// Bulk/wholesale = B2B opportunity\nif (/bulk|wholesale|dozen|carton|box|quantity|gross|thok/.test(q)) {\n  score += 20;\n  signals.push('bulk_inquiry');\n}\n// Urgency = ready to buy now\nif (/urgent|today|asap|jaldi|abhi|chahiye|chaiye|chahiye|abhi chahiye/.test(q)) {\n  score += 15;\n  signals.push('urgency');\n}\n// Price comparison = decision stage\nif (/compare|vs|better|best|recommend|konsa|konsi|suggest/.test(q)) {\n  score += 10;\n  signals.push('comparison');\n}\n// Order related words\nif (/order|mangwana|book|deliver|shipping|send karo/.test(q)) {\n  score += 15;\n  signals.push('order_intent');\n}\n\nscore = Math.min(score, 100);\n\n// ── PRIORITY ─────────────────────────────────────────────────\nlet priority = 'Cold';\nif      (score >= 70) priority = 'Hot';\nelse if (score >= 40) priority = 'Warm';\n\n// ── LEAD NAME ────────────────────────────────────────────────\nconst detectedProduct = data.searchLog?.detected_product || keywords[0] || null;\n\nlet oppName;\nif (detectedName && detectedProduct)\n  oppName = `${detectedName} — ${detectedProduct.charAt(0).toUpperCase()+detectedProduct.slice(1)}`;\nelse if (detectedName)\n  oppName = `${detectedName} — Chatbot Inquiry`;\nelse if (detectedProduct)\n  oppName = `Chatbot: ${detectedProduct.charAt(0).toUpperCase()+detectedProduct.slice(1)}`;\nelse\n  oppName = `Chatbot: ${intent.charAt(0).toUpperCase()+intent.slice(1)} Inquiry`;\n\n// ── ESTIMATED VALUE ──────────────────────────────────────────\nlet estValue = 1000;\nif (intent === 'price')  estValue = 2500;\nif (intent === 'stock')  estValue = 2000;\nif (signals.includes('bulk_inquiry')) estValue = 8000;\nif (detectedPhone) estValue = estValue * 1.5;\n\n// ── SUMMARY ──────────────────────────────────────────────────\nconst aiSummary = `Customer asked: \"${message.substring(0,200)}\". Intent: ${intent}. Products matched: ${productsFound}. Signals: ${signals.join(', ')}.${detectedPhone?' Phone: '+detectedPhone:''}${detectedName?' Name: '+detectedName:''}`;\n\nlet action;\nif (detectedPhone)         action = '📞 CALL NOW — customer ne phone number diya!';\nelse if (priority==='Hot') action = '⚡ Call within 2 hours — high purchase intent';\nelse if (priority==='Warm')action = '💬 Send follow-up message today';\nelse                       action = '👀 Monitor — early stage interest';\n\nreturn [{\n  json: {\n    business_id: businessId,\n    name: oppName,\n    service: detectedProduct || intent,\n    phone: detectedPhone,\n    source: 'chatbot',\n    status: 'new',\n    priority,\n    score,\n    signals: signals.join(','),\n    ai_summary: aiSummary,\n    recommended_action: action,\n    estimated_value: Math.round(estValue),\n    query_text: message.substring(0, 500),\n    session_id: sessionId,\n    products_found: productsFound,\n    intent,\n    created_at: new Date().toISOString(),\n    searchLog: data.searchLog,\n    reply: data.reply,\n    success: data.success,\n    needsAlert: priority === 'Hot' || !!detectedPhone\n  }\n}];"
+      },
+      "id": "38e20618-7064-419a-bb9e-1f7d0ef95dbe",
+      "name": "Score & Qualify Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        -1296
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/crm_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.skipSave ? '{}' : JSON.stringify({ business_id: $json.business_id, name: $json.name, service: $json.service, phone: $json.phone, source: 'chatbot', status: 'new', priority: $json.priority, score: $json.score, signals: $json.signals, ai_summary: $json.ai_summary, recommended_action: $json.recommended_action, estimated_value: $json.estimated_value, query_text: $json.query_text, session_id: $json.session_id, products_found: $json.products_found, intent: $json.intent, created_at: $json.created_at }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "23be3271-2542-4692-b53d-635236a1ece3",
+      "name": "Save to CRM Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1696,
+        -1296
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "contact-check-01",
+              "leftValue": "={{ $json.isContactSubmission }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4945de4c-6a2e-4d9b-bc91-3d23195a92e8",
+      "name": "IF Contact Submission",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -1392
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst intentData = $input.first().json;\nconst businessId = intentData.business_id || '';\nconst detectedPhone = intentData.detectedPhone || '';\nconst detectedName  = intentData.detectedName  || '';\nconst sessionId     = intentData.session_id || '';\nconst message       = intentData.message || '';\n\n// Thank you reply\nlet reply;\nif (detectedName) {\n  reply = `Shukriya ${detectedName} ji! 🙏 Hamare team member aapko jald hi contact karenge. Kya aur kuch poochna chahte hain?`;\n} else {\n  reply = `Shukriya! 🙏 Aapka number (${detectedPhone}) note ho gaya. Hamare team member aapko jald hi WhatsApp karenge. Kya aur kuch poochna chahte hain?`;\n}\n\n// High score since phone shared\nconst score = detectedPhone ? 85 : 60;\nconst priority = score >= 70 ? 'Hot' : 'Warm';\n\nconst oppName = detectedName \n  ? `${detectedName} — Phone Shared`\n  : `Contact Submission — ${detectedPhone}`;\n\nconst aiSummary = `Customer ne phone number share kiya: ${detectedPhone}. ${detectedName ? 'Naam: '+detectedName+'.' : ''} Direct contact available.`;\n\nreturn [{\n  json: {\n    business_id: businessId,\n    name: oppName,\n    service: 'direct_contact',\n    phone: detectedPhone,\n    source: 'chatbot',\n    status: 'new',\n    priority,\n    score,\n    signals: 'phone_shared,contact_submission',\n    ai_summary: aiSummary,\n    recommended_action: 'CALL NOW — customer ne phone number diya!',\n    estimated_value: 3000,\n    query_text: message.substring(0, 500),\n    session_id: sessionId,\n    products_found: 0,\n    intent: 'contact_submission',\n    created_at: new Date().toISOString(),\n    reply,\n    success: true,\n    needsAlert: true,\n    searchLog: {\n      business_id: businessId,\n      query_text: message.substring(0, 500),\n      detected_product: null,\n      detected_intent: 'contact_submission',\n      products_found: 0,\n      session_id: sessionId,\n      created_at: new Date().toISOString()\n    }\n  }\n}];\n"
+      },
+      "id": "86fc337a-20bc-41b1-affd-758aa5f321ba",
+      "name": "Handle Contact Submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -1488
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/crm_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ business_id: $json.business_id, name: $json.name, service: $json.service, phone: $json.phone, source: 'chatbot', status: 'new', priority: $json.priority, score: $json.score, signals: $json.signals, ai_summary: $json.ai_summary, recommended_action: $json.recommended_action, estimated_value: $json.estimated_value, query_text: $json.query_text, session_id: $json.session_id, products_found: 0, intent: 'contact_submission', created_at: $json.created_at }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c74d7e95-fe3b-4ce2-9afc-4f1f0849ec5c",
+      "name": "Save Contact to CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        -1488
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction cleanPhone(raw) {\n  if (!raw) return { phone: null, waNumber: null, waLink: null };\n  \n  // Remove spaces, dashes, dots, brackets\n  let phone = raw.replace(/[\\s\\-\\.()]/g, '');\n  \n  // Already has + — remove it for wa.me\n  if (phone.startsWith('+')) {\n    const waNumber = phone.slice(1);\n    return { phone: raw, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Pakistan: 03xxxxxxxxx → 923xxxxxxxxx\n  if (/^03\\d{9}$/.test(phone)) {\n    const waNumber = '92' + phone.slice(1);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Pakistan with 0092: 00923xxxxxxxxx\n  if (phone.startsWith('0092')) {\n    const waNumber = phone.slice(2);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Already has country code (10-15 digits, no leading 0)\n  // e.g. 923001234567, 447911123456, 12025551234\n  if (/^[1-9]\\d{9,14}$/.test(phone)) {\n    return { phone, waNumber: phone, waLink: `https://wa.me/${phone}` };\n  }\n  \n  // UAE: 05xxxxxxxx → 9715xxxxxxxx\n  if (/^05\\d{8}$/.test(phone)) {\n    const waNumber = '971' + phone.slice(1);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // UK: 07xxxxxxxxx → 447xxxxxxxxx\n  if (/^07\\d{9}$/.test(phone)) {\n    const waNumber = '44' + phone.slice(1);\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // US/Canada: 10 digits starting with area code\n  if (/^[2-9]\\d{9}$/.test(phone)) {\n    const waNumber = '1' + phone;\n    return { phone, waNumber, waLink: `https://wa.me/${waNumber}` };\n  }\n  \n  // Fallback — use as-is\n  return { phone, waNumber: phone, waLink: `https://wa.me/${phone}` };\n}\n\nconst d = $('Handle Contact Submission').first().json;\nconst { phone, waNumber, waLink } = cleanPhone(d.phone);\n\nlet msg = `🔴🔥 *PHONE NUMBER MILA — SK Natural!*\\n\\n`;\nif (d.name && !d.name.includes('Contact Submission')) {\n  msg += `👤 *Naam:* ${d.name}\\n`;\n}\nmsg += `📞 *Phone:* ${d.phone}\\n`;\nif (waNumber) msg += `🌍 *International:* +${waNumber}\\n`;\nmsg += `💬 *Poocha tha:* \"${(d.query_text||'').substring(0,100)}\"\\n\\n`;\nmsg += `📊 *Score:* ${d.score}/100 — ${d.priority}\\n\\n`;\nif (waLink) {\n  msg += `👇 *EK CLICK MEIN WHATSAPP KARO:*\\n`;\n  msg += `${waLink}\\n`;\n}\nmsg += `\\n_BizFlow AI — ${new Date().toLocaleTimeString('en-PK')}_`;\n\nreturn [{ json: { ...d, telegramMsg: msg, telegram_chat_id: '6712600936', waLink } }];\n"
+      },
+      "id": "56e8c2f7-629b-4450-a804-296da0d70cf6",
+      "name": "Build Contact Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -1488
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "6712600936",
+        "text": "={{ $json.telegramMsg }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "d45bfba7-86db-49a2-a531-9d8561042d13",
+      "name": "Send Contact Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        -1488
+      ],
+      "webhookId": "f78b4281-3ad4-405c-ac7c-f0dcef47fb0e",
+      "credentials": {
+        "telegramApi": {
+          "id": "bA6IACUtHcixe0n1",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, reply: $('Handle Contact Submission').first().json.reply, intent: 'contact_submission', products_found: 0, session_id: $('Handle Contact Submission').first().json.session_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "7667da01-6be1-4921-b028-5f0d07a50573",
+      "name": "Return Contact Answer",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1248,
+        -1488
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chatbot Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate & Classify Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Classify Intent": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "IF Contact Submission",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return 400 Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Supabase Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Products from Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Products from Supabase": {
+      "main": [
+        [
+          {
+            "node": "Format Products for Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Products for Claude": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat — Generate Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract OpenAI Reply": {
+      "main": [
+        [
+          {
+            "node": "Score & Qualify Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat — Generate Answer": {
+      "main": [
+        [
+          {
+            "node": "Extract OpenAI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Customer Search": {
+      "main": [
+        [
+          {
+            "node": "Return Answer to User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to CRM Leads": {
+      "main": [
+        [
+          {
+            "node": "Get Telegram Chat ID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Customer Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Telegram Chat ID": {
+      "main": [
+        [
+          {
+            "node": "Merge Telegram ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Telegram ID": {
+      "main": [
+        [
+          {
+            "node": "Build Hot Lead Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Hot Lead Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Hot Lead Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Hot Lead Telegram": {
+      "main": [
+        [
+          {
+            "node": "Return Answer to User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & Qualify Lead": {
+      "main": [
+        [
+          {
+            "node": "Save to CRM Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Contact Submission": {
+      "main": [
+        [
+          {
+            "node": "Handle Contact Submission",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Supabase Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Contact Submission": {
+      "main": [
+        [
+          {
+            "node": "Save Contact to CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Contact to CRM": {
+      "main": [
+        [
+          {
+            "node": "Build Contact Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Contact Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Contact Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Contact Telegram": {
+      "main": [
+        [
+          {
+            "node": "Return Contact Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "a39b9b96-3393-4cfd-aefc-94c21d998ab3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "E6W3Jf7aejz3cYifG3tDl",
+  "tags": []
+}
