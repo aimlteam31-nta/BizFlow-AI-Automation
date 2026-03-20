@@ -1,0 +1,341 @@
+{
+  "name": "FINAL_6wf_Real-Time Dashboard_fixed",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dashboard-event",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "daf7a598-b5f0-4799-9a58-99795eefff1e",
+      "name": "Dashboard Event Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        288,
+        288
+      ],
+      "webhookId": "dashboard-event"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract business_id, range, metric from body or query\nconst body = $input.item.json.body || $input.item.json || {};\nconst query = $input.item.json.query || {};\n\nconst businessId = body.business_id || query.business_id || 'all';\nconst range = parseInt(body.range || query.range || 7);\nconst metric = body.metric || query.metric || 'revenue';\n\nconst now = new Date();\n\n// Today\nconst todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());\nconst todayEnd = new Date(todayStart);\ntodayEnd.setDate(todayEnd.getDate() + 1);\n\n// Range start (7, 30, or 90 days ago)\nconst rangeStart = new Date(now);\nrangeStart.setDate(rangeStart.getDate() - range);\nrangeStart.setHours(0, 0, 0, 0);\n\nreturn {\n  json: {\n    business_id: businessId,\n    range,\n    metric,\n    today_start: todayStart.toISOString(),\n    today_end: todayEnd.toISOString(),\n    today_date: now.toISOString().split('T')[0],\n    range_start: rangeStart.toISOString(),\n    range_end: now.toISOString()\n  }\n};"
+      },
+      "id": "30f9f8d9-3b64-4fcd-a39b-3a5e7e2c1325",
+      "name": "Extract Business ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "woocommerce_orders",
+        "limit": 1000,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "business_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.business_id }}"
+            },
+            {
+              "keyName": "date_created",
+              "condition": "gte",
+              "keyValue": "={{ $json.range_start }}"
+            }
+          ]
+        }
+      },
+      "id": "e9a5a4e3-4d72-4570-870a-3cd5b727b011",
+      "name": "Get Range Orders",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        736,
+        0
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "woocommerce_products",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "stock_status",
+              "condition": "eq",
+              "keyValue": "lowstock"
+            },
+            {
+              "keyName": "business_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.business_id }}"
+            }
+          ]
+        }
+      },
+      "id": "984caf1e-bd19-4b3c-9962-04aca9b837f4",
+      "name": "Get Low Stock",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        736,
+        192
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "woocommerce_orders",
+        "limit": 5,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "business_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.business_id }}"
+            }
+          ]
+        }
+      },
+      "id": "b6610ce0-e76f-4dec-b643-5f8d903592d3",
+      "name": "Get Recent Orders",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        736,
+        384
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "leads",
+        "limit": 5,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "business_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.business_id }}"
+            }
+          ]
+        }
+      },
+      "id": "1ced0579-993d-4898-9566-b9808c18619a",
+      "name": "Get Recent Leads",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        736,
+        576
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        960,
+        256
+      ],
+      "id": "81207d4c-b8f4-4c38-a795-65bc1c893946",
+      "name": "Merge All Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const bizData = $('Extract Business ID').item.json;\nconst range = bizData.range || 7;\nconst metric = bizData.metric || 'revenue';\n\nconst rangeOrders = $('Get Range Orders').all();\nconst lowStockData = $('Get Low Stock').all();\nconst recentOrdersData = $('Get Recent Orders').all();\nconst recentLeadsData = $('Get Recent Leads').all();\n\nconst now = new Date();\nconst todayStr = bizData.today_date;\n\n// --- Today metrics ---\nconst todayOrders = rangeOrders.filter(o => {\n  const d = o.json.date_created || '';\n  return d.startsWith(todayStr);\n});\n\nlet todayRevenue = 0;\nlet pendingOrders = 0;\nconst oneHourAgo = new Date(now - 3600000);\n\nfor (const order of todayOrders) {\n  const status = (order.json.status || '').toLowerCase();\n  if (!['cancelled', 'refunded', 'failed'].includes(status)) {\n    todayRevenue += parseFloat(order.json.total) || 0;\n  }\n  if (status === 'processing') pendingOrders++;\n}\n\nconst ordersLastHour = rangeOrders.filter(o => new Date(o.json.date_created) >= oneHourAgo).length;\n\n// --- Build daily chart_data for the selected range ---\n// Create a map of date -> {revenue, orders}\nconst dayMap = {};\n\n// Initialize all days in range to 0\nfor (let i = range - 1; i >= 0; i--) {\n  const d = new Date(now);\n  d.setDate(d.getDate() - i);\n  const key = d.toISOString().split('T')[0];\n  dayMap[key] = { date: key, revenue: 0, orders: 0, leads: 0 };\n}\n\n// Fill orders data\nfor (const o of rangeOrders) {\n  const status = (o.json.status || '').toLowerCase();\n  const dateStr = (o.json.date_created || '').substring(0, 10);\n  if (!dayMap[dateStr]) continue;\n  \n  if (!['cancelled', 'refunded', 'failed'].includes(status)) {\n    dayMap[dateStr].revenue += parseFloat(o.json.total) || 0;\n  }\n  dayMap[dateStr].orders += 1;\n}\n\n// Fill leads data\nfor (const l of recentLeadsData) {\n  const dateStr = (l.json.created_at || '').substring(0, 10);\n  if (dayMap[dateStr]) dayMap[dateStr].leads += 1;\n}\n\n// Convert to sorted array with formatted labels\nconst chart_data = Object.values(dayMap)\n  .sort((a, b) => a.date.localeCompare(b.date))\n  .map(d => ({\n    date: d.date,\n    label: range <= 7\n      ? new Date(d.date).toLocaleDateString('en-US', { weekday: 'short' })\n      : range <= 31\n        ? new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })\n        : new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),\n    revenue: Math.round(d.revenue),\n    orders: d.orders,\n    leads: d.leads\n  }));\n\n// --- Summary metrics ---\nconst totalRevenue = rangeOrders\n  .filter(o => !['cancelled','refunded','failed'].includes((o.json.status||'').toLowerCase()))\n  .reduce((s, o) => s + (parseFloat(o.json.total) || 0), 0);\n\nconst totalOrders = rangeOrders.length;\nconst avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;\n\n// Status counts\nconst statusCounts = {};\nrangeOrders.forEach(o => {\n  const s = o.json.status || 'unknown';\n  statusCounts[s] = (statusCounts[s] || 0) + 1;\n});\n\n// Low stock\nconst lowStockList = lowStockData.map(i => ({\n  product_name: i.json.name,\n  stock_quantity: i.json.stock_quantity,\n  sku: i.json.sku\n}));\n\n// Recent orders\nconst recentOrdersList = recentOrdersData.map(o => {\n  const createdAt = new Date(o.json.date_created);\n  const diffMins = Math.floor((now - createdAt) / 60000);\n  const timeAgo = diffMins < 1 ? 'Just now'\n    : diffMins < 60 ? `${diffMins} mins ago`\n    : `${Math.floor(diffMins/60)} hrs ago`;\n  return {\n    wc_order_id: o.json.wc_order_id,\n    order_number: o.json.order_number,\n    customer_name: o.json.customer_name,\n    total: o.json.total,\n    status: o.json.status,\n    date_created: o.json.date_created,\n    time_ago: timeAgo\n  };\n});\n\n// Recent leads\nconst recentLeadsList = recentLeadsData.map(l => ({\n  name: l.json.name,\n  email: l.json.email,\n  source: l.json.source,\n  lead_score: l.json.lead_score,\n  status: l.json.status,\n  created_at: l.json.created_at\n}));\n\nreturn {\n  json: {\n    success: true,\n    business_id: bizData.business_id,\n    range,\n    metric,\n    generated_at: now.toISOString(),\n    chart_data,\n    dashboard: {\n      metrics: {\n        total_orders_today: todayOrders.length,\n        orders_last_hour: ordersLastHour,\n        revenue_today: Math.round(todayRevenue * 100) / 100,\n        pending_orders: pendingOrders,\n        low_stock_alerts: lowStockData.length,\n        total_revenue_range: Math.round(totalRevenue),\n        total_orders_range: totalOrders,\n        avg_order_value: avgOrderValue,\n        status_counts: statusCounts\n      },\n      recent_orders: recentOrdersList,\n      low_stock_items: lowStockList,\n      recent_leads: recentLeadsList\n    },\n    summary: {\n      status: 'active',\n      needs_attention: lowStockData.length > 0,\n      last_updated: now.toISOString()\n    }\n  }\n};"
+      },
+      "id": "8f5544f1-149d-4f12-a721-d50aad4df853",
+      "name": "Calculate Dashboard Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b013752a-6a18-4674-96cd-888c2c715124",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        288
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Dashboard Event Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Business ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Business ID": {
+      "main": [
+        [
+          {
+            "node": "Get Range Orders",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Low Stock",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Recent Orders",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Recent Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Low Stock": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Recent Orders": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Get Recent Leads": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge All Data": {
+      "main": [
+        [
+          {
+            "node": "Calculate Dashboard Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Dashboard Metrics": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Range Orders": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "48fd4fce-9f11-4113-ba47-4dcc82f271ff",
+  "meta": {
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "tX8sXQZsjrelo6LY6dccj",
+  "tags": []
+}
