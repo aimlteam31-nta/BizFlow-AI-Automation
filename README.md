@@ -1,4 +1,4 @@
-Live Demo Link: https://bizflowaierp.lovable.app/
+Live Demo Link: bizflowaierp.netlify.app
 
 Video Presentation: https://drive.google.com/file/d/1oM5utFkX_oHx7HfgsR6v_l9drqdiFYH2/view?usp=sharing
 
@@ -269,8 +269,7 @@ cd dashboard && npm install && npm run build
 
 - **Telegram Bot:** @bizflow_support_bot
 - **Email:** aiml.team31@gmail.com
-- **Dashboard:** https://bizflowaierp.lovable.app
-
+- **Dashboard:** bizflowaierp.netlify.app
 ---
 
 *Built with ❤️ for Pakistani SMBs — BizFlow AI v2.0*
