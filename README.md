@@ -268,7 +268,7 @@ cd dashboard && npm install && npm run build
 ## Support
 
 - **Telegram Bot:** @bizflow_support_bot
-- **Email:** support@bizflow.ai
+- **Email:** aiml.team31@gmail.com
 - **Dashboard:** https://bizflowaierp.lovable.app
 
 ---
