@@ -1,0 +1,360 @@
+{
+  "name": "FINAL_WF8_Sales_Analytics_v3",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sales-analytics",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "04f6bbdd-b028-4f07-a12a-8f6643dd95f8",
+      "name": "Sales Analytics Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        -128
+      ],
+      "webhookId": "sales-analytics-v2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw;\nconst message = String(body.message || '').trim();\nconst business_id = String(body.business_id || '').trim();\nconst session_id = String(body.session_id || Date.now()).trim();\n\nif (!message || !business_id) {\n  return [{ json: { valid: false, error: 'message and business_id required' } }];\n}\n\nconst q = message.toLowerCase();\nconst now = new Date();\n\nconst todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);\nconst todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);\n\nlet dateFrom, dateTo, period, intentLabel;\n\n// --- TODAY ---\nif (q.includes('today') || q.includes('aaj') || q.includes('آج')) {\n  period = 'today'; intentLabel = 'Aaj ki sales';\n  dateFrom = new Date(todayStart); dateTo = new Date(todayEnd);\n}\n// --- YESTERDAY ---\nelse if (q.includes('yesterday') || q.includes('kal') || q.includes('کل')) {\n  period = 'yesterday'; intentLabel = 'Kal ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 1);\n  dateTo = new Date(todayEnd); dateTo.setDate(dateTo.getDate() - 1);\n}\n// --- LAST 90 DAYS / 3 MONTHS ---\nelse if (\n  q.includes('90 day') || q.includes('90 din') || q.includes('90din') ||\n  q.includes('teen mahine') || q.includes('3 month') || q.includes('tin month') ||\n  q.includes('last quarter') || q.includes('pichle teen')\n) {\n  period = '90days'; intentLabel = 'Pichle 90 din ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 90);\n  dateTo = new Date(todayEnd);\n}\n// --- LAST 30 DAYS ---\nelse if (\n  q.includes('30 day') || q.includes('30 din') || q.includes('pichle 30')\n) {\n  period = '30days'; intentLabel = 'Pichle 30 din ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 30);\n  dateTo = new Date(todayEnd);\n}\n// --- SPECIFIC MONTH BY NAME (e.g. february, january, march) ---\nelse if (\n  q.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\b/) ||\n  q.match(/\\b(jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\\b/) ||\n  q.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\s+\\d{4}\\b/)\n) {\n  const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december'];\n  const shortNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];\n  let monthIdx = -1;\n  for (let i = 0; i < monthNames.length; i++) {\n    if (q.includes(monthNames[i]) || q.includes(shortNames[i])) { monthIdx = i; break; }\n  }\n  // Detect year from query, else use current or previous year smartly\n  const yearMatch = q.match(/\\b(20\\d{2})\\b/);\n  let targetYear = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear();\n  // If month is in future this year, go to last year\n  if (monthIdx > now.getMonth() && targetYear === now.getFullYear()) targetYear -= 1;\n  period = 'specific_month'; intentLabel = `${monthNames[monthIdx] ? monthNames[monthIdx].charAt(0).toUpperCase() + monthNames[monthIdx].slice(1) : 'Month'} ${targetYear} ki sales`;\n  dateFrom = new Date(targetYear, monthIdx, 1, 0, 0, 0, 0);\n  dateTo = new Date(targetYear, monthIdx + 1, 0, 23, 59, 59, 999);\n}\n// --- LAST MONTH ---\nelse if (q.includes('last month') || q.includes('pichle mahine') || q.includes('pichla mahina') || q.includes('pichle mah')) {\n  period = 'last_month'; intentLabel = 'Pichle mahine ki sales';\n  dateFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);\n  dateTo = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);\n}\n// --- THIS MONTH ---\nelse if (q.includes('month') || q.includes('mahina') || q.includes('mahine') || q.includes('mah ')) {\n  period = 'month'; intentLabel = 'Is mahine ki sales';\n  dateFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);\n  dateTo = new Date(todayEnd);\n}\n// --- LAST WEEK ---\nelse if (q.includes('last week') || q.includes('pichle hafte') || q.includes('pichla hafta')) {\n  period = 'last_week'; intentLabel = 'Pichle hafte ki sales';\n  const dayOfWeek = now.getDay();\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - dayOfWeek - 7);\n  dateTo = new Date(todayStart); dateTo.setDate(dateTo.getDate() - dayOfWeek - 1); dateTo.setHours(23,59,59,999);\n}\n// --- THIS WEEK ---\nelse if (q.includes('week') || q.includes('hafta') || q.includes('hafte') || q.includes('ہفتہ')) {\n  period = 'week'; intentLabel = 'Is hafte ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 7);\n  dateTo = new Date(todayEnd);\n}\n// --- THIS YEAR ---\nelse if (q.includes('year') || q.includes('saal') || q.includes('سال')) {\n  period = 'year'; intentLabel = 'Is saal ki sales';\n  dateFrom = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);\n  dateTo = new Date(todayEnd);\n}\n// --- DEFAULT: last 7 days ---\nelse {\n  period = 'week'; intentLabel = 'Is hafte ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 7);\n  dateTo = new Date(todayEnd);\n}\n\nconst dateFromISO = dateFrom.toISOString();\nconst dateToISO = dateTo.toISOString();\n\nconst SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw';\nconst base = 'https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders';\nconst fields = 'wc_order_id,order_number,status,total,customer_name,date_created,line_items';\nconst ordersUrl = `${base}?business_id=eq.${business_id}&date_created=gte.${dateFromISO}&date_created=lte.${dateToISO}&select=${fields}&order=date_created.desc&limit=500`;\n\nreturn [{\n  json: { valid: true, message, business_id, session_id, period, intentLabel, dateFrom: dateFromISO, dateTo: dateToISO, ordersUrl, supaKey: SUPA_KEY, q }\n}];"
+      },
+      "id": "32f96e4f-0c96-4acf-8da5-960de38017ab",
+      "name": "Classify & Build Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "72e0a5f0-166c-4669-b19e-cdb0859511d8",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        96,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "555698fb-b0fa-4eb9-b564-3c505ca47c5a",
+      "name": "Return 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        320,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.ordersUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supaKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supaKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "f6ca485a-64ff-4825-8e3f-f6abbaad89df",
+      "name": "Fetch Orders from Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        -224
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const classifyData = $('Classify & Build Query').first().json;\nconst rawInput = $input.all();\n\nlet orders = [];\nfor (const item of rawInput) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    orders = orders.concat(d);\n  } else if (d && d.wc_order_id) {\n    orders.push(d);\n  } else if (d && Array.isArray(d.data)) {\n    orders = orders.concat(d.data);\n  }\n}\n\nif (orders.length === 0) {\n  return [{\n    json: {\n      ...classifyData,\n      summary: `${classifyData.intentLabel} mein koi order nahi mila. (${classifyData.dateFrom.split('T')[0]} se ${classifyData.dateTo.split('T')[0]} tak)`,\n      total_orders: 0,\n      total_revenue: 0,\n      analytics: null,\n      dailyBreakdown: []\n    }\n  }];\n}\n\nlet totalRevenue = 0, completedRevenue = 0, pendingRevenue = 0;\nconst statusCount = {}, productSales = {}, dailyRevenue = {};\n\nfor (const o of orders) {\n  const amount = parseFloat(o.total) || 0;\n  totalRevenue += amount;\n  const status = o.status || 'unknown';\n  statusCount[status] = (statusCount[status] || 0) + 1;\n  if (['completed', 'processing'].includes(status)) completedRevenue += amount;\n  else if (status === 'pending') pendingRevenue += amount;\n\n  if (o.date_created) {\n    const day = o.date_created.split('T')[0] || o.date_created.split(' ')[0];\n    if (!dailyRevenue[day]) dailyRevenue[day] = { revenue: 0, orders: 0 };\n    dailyRevenue[day].revenue += amount;\n    dailyRevenue[day].orders += 1;\n  }\n\n  const lineItems = Array.isArray(o.line_items) ? o.line_items : [];\n  for (const item of lineItems) {\n    const name = item.name || 'Unknown';\n    const qty = parseInt(item.quantity) || 1;\n    const subtotal = parseFloat(item.subtotal) || 0;\n    if (!productSales[name]) productSales[name] = { qty: 0, revenue: 0 };\n    productSales[name].qty += qty;\n    productSales[name].revenue += subtotal;\n  }\n}\n\nconst topProducts = Object.entries(productSales)\n  .sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5)\n  .map(([name, data]) => `• ${name}: Rs.${Math.round(data.revenue).toLocaleString()} (${data.qty} units)`);\n\nconst statusLines = Object.entries(statusCount)\n  .sort((a, b) => b[1] - a[1]).map(([s, c]) => `${s}: ${c}`);\n\nconst avgOrderValue = Math.round(totalRevenue / orders.length);\n\n// Sort daily revenue\nconst sortedDays = Object.entries(dailyRevenue).sort((a, b) => b[1].revenue - a[1].revenue);\nconst bestDay = sortedDays[0];\nconst worstDay = sortedDays[sortedDays.length - 1];\n\n// Build top 10 days breakdown for date-specific queries\nconst top10Days = sortedDays.slice(0, 10)\n  .map(([date, data]) => `• ${date}: Rs.${Math.round(data.revenue).toLocaleString()} (${data.orders} orders)`);\n\nconst summary = `${classifyData.intentLabel} (${classifyData.dateFrom.split('T')[0]} se ${classifyData.dateTo.split('T')[0]} tak):\n\nTotal Orders: ${orders.length}\nTotal Revenue: Rs.${Math.round(totalRevenue).toLocaleString()}\nCompleted Revenue: Rs.${Math.round(completedRevenue).toLocaleString()}\nPending Revenue: Rs.${Math.round(pendingRevenue).toLocaleString()}\nAverage Order Value: Rs.${avgOrderValue.toLocaleString()}\nOrder Status: ${statusLines.join(', ')}\n${topProducts.length > 0 ? `\\nTop Products:\\n${topProducts.join('\\n')}` : ''}\n${bestDay ? `\\nBest Day: ${bestDay[0]} — Rs.${Math.round(bestDay[1].revenue).toLocaleString()} (${bestDay[1].orders} orders)` : ''}\n${worstDay && worstDay[0] !== bestDay[0] ? `Lowest Day: ${worstDay[0]} — Rs.${Math.round(worstDay[1].revenue).toLocaleString()}` : ''}\n\\nTop 10 Highest Revenue Dates:\\n${top10Days.join('\\n')}`.trim();\n\nreturn [{\n  json: {\n    ...classifyData,\n    summary,\n    total_orders: orders.length,\n    total_revenue: Math.round(totalRevenue),\n    analytics: {\n      totalRevenue: Math.round(totalRevenue),\n      completedRevenue: Math.round(completedRevenue),\n      pendingRevenue: Math.round(pendingRevenue),\n      avgOrderValue,\n      statusCount,\n      topProducts,\n      bestDay: bestDay ? bestDay[0] : null,\n      top10Days\n    }\n  }\n}];"
+      },
+      "id": "10975d24-0290-4142-bf37-88c95bdffa06",
+      "name": "Calculate Analytics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "cachedResultName": "GPT-4O",
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are BizFlow AI — an expert business intelligence assistant for a WooCommerce store in Pakistan. You think like a business consultant, not just a data reporter.\n\n═══ LANGUAGE ═══\nMatch user's language exactly: Urdu → Urdu, English → English, Mix → Mix.\nRoman Urdu preferred for a conversational feel.\n\n═══ RESPONSE FORMAT ═══\nBullet points (•) for all lists.\nBold for all important numbers and key insights.\nMax 15-18 lines per response.\nEnd EVERY response with 💡 Tip: (one specific action).\nNever use # headers.\n\n═══ ALWAYS INCLUDE ═══\nTotal revenue + total orders together.\nBest performing day/product.\nGrowth/Decline comparison if data available.\nOne warning (Priority: Inventory, Cancellation, or Drop).\nOne \"AI-Powered Opportunity\" for today.\n\n═══ DATE-SPECIFIC QUERIES ═══\nIf user asks about specific dates, highest/lowest days, or date rankings:\n- List the Top 10 highest revenue dates clearly with date, revenue, and orders\n- Highlight the single best day with bold\n- If period has no sales on some days, mention that\n- Always show date in readable format (e.g. 14 March 2026)\n\n═══ MONTH-SPECIFIC QUERIES ═══\nIf user asks about a specific month (e.g. February 2026):\n- Show total revenue and orders for that exact month\n- If data shows 0 orders, clearly state no sales recorded for that month\n- Do NOT show data from a different period\n\n═══ AI-ASSISTED ERP STRATEGY ═══\nInventory Intelligence: If stock < threshold, link it to revenue impact.\nPricing Strategy: Suggest dynamic pricing or bundling for high volume/low margin products.\nPredictive Restocking: Suggest restock quantities based on sales velocity.\n\n═══ SMART INSIGHTS ═══\nSales Trend: If sales declining, suggest immediate marketing trigger.\nProduct Dependency: If 1 product > 40% revenue, suggest diversification.\nForecasting: Project 7/30-day revenue based on daily averages.",
+              "role": "system"
+            },
+            {
+              "content": "=User question: {{ $json.message }}\n\nSales Analytics Data:\n{{ $json.summary }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 600,
+          "temperature": 0.3
+        }
+      },
+      "id": "c001e05d-f9fe-4abc-8f0e-6d6f1306cac7",
+      "name": "OpenAI Sales Insight",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        768,
+        -224
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "PQfPyqdpbAK30RzL",
+          "name": "OpenAi account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const openaiResp = $input.first().json;\nconst analyticsData = $('Calculate Analytics').first().json;\nconst classifyData = $('Classify & Build Query').first().json;\n\nconst responseTimeMs = Date.now() - parseInt(classifyData.session_id);\n\nlet reply = '';\ntry {\n  if (openaiResp.message && openaiResp.message.content) {\n    reply = openaiResp.message.content;\n  } else if (openaiResp.text) {\n    reply = openaiResp.text;\n  } else {\n    reply = analyticsData.summary || 'Data fetch ho gaya lekin AI response nahi aaya.';\n  }\n} catch(e) {\n  reply = analyticsData.summary || 'Error occurred.';\n}\n\nreturn [{\n  json: {\n    success: true,\n    reply,\n    period: classifyData.period,\n    total_orders: analyticsData.total_orders,\n    total_revenue: analyticsData.total_revenue,\n    session_id: classifyData.session_id,\n    logEntry: {\n      business_id: classifyData.business_id,\n      workflow_type: 'sales_analytics',\n      query_text: classifyData.message.substring(0, 500),\n      intent: classifyData.period,\n      response_time_ms: responseTimeMs > 0 ? responseTimeMs : 3000,\n      success: true,\n      created_at: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "1b6cfa74-d249-4825-bde8-e90cf884e750",
+      "name": "Extract Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/ai_query_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.logEntry) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "264b96f7-ba32-4fea-b5b1-c907716bc21d",
+      "name": "Log to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        -224
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: $('Extract Reply').first().json.success, reply: $('Extract Reply').first().json.reply, period: $('Extract Reply').first().json.period, total_orders: $('Extract Reply').first().json.total_orders, total_revenue: $('Extract Reply').first().json.total_revenue, session_id: $('Extract Reply').first().json.session_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "11160336-52f0-4af1-8084-1731e0dd7486",
+      "name": "Return Answer",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        -224
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Sales Analytics Webhook": {
+      "main": [
+        [
+          {
+            "node": "Classify & Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify & Build Query": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Fetch Orders from Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Orders from Supabase": {
+      "main": [
+        [
+          {
+            "node": "Calculate Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Analytics": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Sales Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Sales Insight": {
+      "main": [
+        [
+          {
+            "node": "Extract Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Reply": {
+      "main": [
+        [
+          {
+            "node": "Log to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Return Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "612f5d9e-c91b-4f5a-9b1b-643156326aa0",
+  "meta": {
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "brRimxzIJxUgmx1mcfO7S",
+  "tags": []
+}
