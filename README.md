@@ -1,4 +1,4 @@
-Live Demo Link: https://aiml-erpai.netlify.app/
+Live Demo Link: https://aiml-erpai-system.netlify.app/
 
 Video Presentation: https://drive.google.com/file/d/1oM5utFkX_oHx7HfgsR6v_l9drqdiFYH2/view?usp=sharing
 
