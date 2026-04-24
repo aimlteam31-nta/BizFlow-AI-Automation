@@ -1,0 +1,715 @@
+{
+  "name": "FIXED_4WF_CRM Lead Capture",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "63220479-c4a5-41fc-acc0-4ab5c395000f",
+      "name": "Lead Capture Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        4064,
+        3456
+      ],
+      "webhookId": "lead-capture"
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $input.first().json.headers || {};\nconst body = $input.first().json.body || $input.first().json;\n\nconst isWooOrder = !!(body.id && body.billing && body.line_items);\n\n// WooCommerce webhook source map\n// Add more businesses here as you onboard them:\n// 'https://clientstore.com/' => 'their-business-id'\nconst WOO_SOURCE_MAP = {\n  'https://www.sknatural.com/': 'ea7bc145-de5f-4c42-9a79-d95853a1dc73',\n  'https://sknatural.com/':     'ea7bc145-de5f-4c42-9a79-d95853a1dc73'\n};\n\nlet lead = {};\n\nif (isWooOrder) {\n  // Identify business from WooCommerce webhook source header\n  const wcSource = headers['x-wc-webhook-source'] || '';\n  const business_id_override = WOO_SOURCE_MAP[wcSource] || null;\n\n  lead = {\n    source:               'woocommerce_order',\n    wc_order_id:          body.id,\n    name:                 ((body.billing.first_name || '') + ' ' + (body.billing.last_name || '')).trim() || 'Unknown',\n    email:                body.billing.email || null,\n    phone:                body.billing.phone || null,\n    city:                 body.billing.city || null,\n    country:              body.billing.country || null,\n    order_total:          parseFloat(body.total) || 0,\n    currency:             body.currency || 'PKR',\n    products:             (body.line_items || []).map(i => i.name).join(', '),\n    webhook_secret:       body.webhook_secret || null,\n    business_id_override: business_id_override,\n    raw_payload:          body\n  };\n} else {\n  lead = {\n    source:               body.source || 'manual',\n    wc_order_id:          null,\n    name:                 body.name || body.full_name || 'Unknown',\n    email:                body.email || null,\n    phone:                body.phone || null,\n    city:                 body.city || null,\n    country:              body.country || 'PK',\n    order_total:          parseFloat(body.order_total || body.budget || 0),\n    currency:             body.currency || 'PKR',\n    products:             body.products || body.interested_in || null,\n    webhook_secret:       $input.first().json.headers?.['x-wc-webhook-secret'] || body.webhook_secret || null,\n    business_id_override: null,\n    raw_payload:          body\n  };\n}\n\nif (!lead.email && !lead.phone) {\n  throw new Error('Lead must have email or phone');\n}\n\nreturn [{ json: { ...lead, receivedAt: new Date().toISOString() } }];"
+      },
+      "id": "f82a4bd0-1335-4ead-bd05-5d31040374c8",
+      "name": "Parse Lead Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4304,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/api_credentials?{{ $json.business_id_override ? 'business_id=eq.' + $json.business_id_override : 'webhook_secret=eq.' + $json.webhook_secret }}&select=business_id,is_active",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0455578c-38bb-42dc-ba7b-e5b540d8f2f6",
+      "name": "Lookup Business by Secret",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4544,
+        3456
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Parse Lead Data').first().json;\nconst raw  = $input.first().json;\n\nlet business_id = null;\n\n// Priority 1: direct override from WooCommerce source map\nif (lead.business_id_override) {\n  business_id = lead.business_id_override;\n}\n// Priority 2: Supabase lookup result (direct object)\nelse if (raw.business_id && raw.is_active) {\n  business_id = raw.business_id;\n}\n// Priority 3: Supabase lookup result (array)\nelse if (Array.isArray(raw) && raw[0]?.business_id) {\n  business_id = raw[0].business_id;\n}\n// Priority 4: nested body array\nelse if (Array.isArray(raw.body) && raw.body[0]?.business_id) {\n  business_id = raw.body[0].business_id;\n}\n\nif (!business_id) {\n  throw new Error('Business not found. Check webhook_secret or WOO_SOURCE_MAP.');\n}\n\nreturn [{ json: { ...lead, business_id } }];"
+      },
+      "id": "e4d6323d-8bfc-4664-b2d1-82e05df4ef08",
+      "name": "Extract Business ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4784,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "biz-found-01",
+              "leftValue": "={{ $json.business_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d2c33dad-6d0b-4ebf-80a7-23087f61fbaf",
+      "name": "Business Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5024,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"error\": \"Business not found or inactive\" }",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "24ab31d5-2360-4fe3-be0e-2be980f38bdc",
+      "name": "Return 401 Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        5024,
+        3648
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\nlet score = 50;\nconst reasons = [];\n\nif (d.email)  { score += 10; reasons.push('Has email'); }\nif (d.phone)  { score += 10; reasons.push('Has phone'); }\n\nif (d.order_total >= 5000)      { score += 20; reasons.push('High order value'); }\nelse if (d.order_total >= 1000) { score += 10; reasons.push('Medium order value'); }\nelse if (d.order_total > 0)     { score += 5;  reasons.push('Has order value'); }\n\nif (d.source === 'woocommerce_order') { score += 15; reasons.push('WooCommerce order'); }\n\nscore = Math.min(score, 100);\n\nlet grade, priority;\nif (score >= 80)      { grade = 'A'; priority = 'high'; }\nelse if (score >= 60) { grade = 'B'; priority = 'medium'; }\nelse                  { grade = 'C'; priority = 'low'; }\n\nreturn [{\n  json: {\n    ...d,\n    lead_score:    score,\n    lead_grade:    grade,\n    lead_priority: priority,\n    score_reasons: reasons\n  }\n}];"
+      },
+      "id": "8e8132aa-5b09-42b6-9e08-5d3653f07396",
+      "name": "Score Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5264,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/crm_leads?business_id=eq.{{ $json.business_id }}&phone=eq.{{ $json.phone }}&select=id,phone",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c48ee830-0672-4601-88bd-8d70da771ccf",
+      "name": "Check Existing Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5504,
+        3456
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const scored  = $('Score Lead').first().json;\nconst raw     = $input.first().json;\nconst records = Array.isArray(raw) ? raw : (Array.isArray(raw.body) ? raw.body : []);\n\nconst isExistingCustomer = records.length > 0;\n\nreturn [{ json: { ...scored, isExistingCustomer } }];"
+      },
+      "id": "a07a740d-168d-43df-b77f-ef4dc4f1b5fc",
+      "name": "Check If Customer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5744,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "customer-cond-01",
+              "leftValue": "={{ $json.isExistingCustomer }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d7d1003b-01a0-4b3d-ad0e-7b8403a74d77",
+      "name": "Is Existing Customer?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5984,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ...$input.first().json, skipped: true, reason: 'Already a customer' } }];"
+      },
+      "id": "77889322-b712-4927-a0e6-87f16edc7d1b",
+      "name": "Skip Existing Customer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6224,
+        3328
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/crm_leads",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_id: $json.business_id, source: $json.source, wc_order_id: String($json.wc_order_id || ''), name: $json.name, email: $json.email, phone: $json.phone, city: $json.city, country: $json.country, order_total: $json.order_total, currency: $json.currency, products_interested: $json.products, lead_score: $json.lead_score, lead_grade: $json.lead_grade, lead_priority: $json.lead_priority, score_reasons: $json.score_reasons, status: 'new', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_activity: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "40643e62-4d08-4746-a06e-ff3399d6170a",
+      "name": "Insert New Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6224,
+        3568
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Check If Customer').first().json;\n\nconst priority = d.lead_priority;\nconst score    = d.lead_score;\nconst emoji    = priority === 'high' ? '🔴' : (priority === 'medium' ? '🟡' : '🟢');\n\nlet msg = `${emoji} *New Lead Captured!*\\n\\n`;\nmsg += `👤 *Name:* ${d.name}\\n`;\nif (d.email)         msg += `📧 *Email:* ${d.email}\\n`;\nif (d.phone)         msg += `📞 *Phone:* ${d.phone}\\n`;\nif (d.city)          msg += `📍 *City:* ${d.city}\\n`;\nif (d.products)      msg += `🛍️ *Interested in:* ${d.products}\\n`;\nif (d.order_total > 0) msg += `💰 *Order Value:* ${d.currency} ${d.order_total.toLocaleString()}\\n`;\nmsg += `\\n`;\nmsg += `📊 *Score:* ${score}/100 (Grade ${d.lead_grade})\\n`;\nmsg += `⚡ *Priority:* ${priority.toUpperCase()}\\n`;\nmsg += `📥 *Source:* ${d.source}\\n`;\nmsg += `\\n_BizFlow CRM_`;\n\nreturn [{ json: { ...d, notificationMsg: msg, isNew: true } }];"
+      },
+      "id": "c31a810e-8c96-4eba-b242-914431a3ee64",
+      "name": "Build Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6512,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses?business_id=eq.{{ $json.business_id }}&select=telegram_chat_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e4eca83c-4c64-4377-a793-85d0b6191cc3",
+      "name": "Get Business Telegram ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6752,
+        3456
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const notif = $('Build Notification').first().json;\nconst raw   = $input.first().json;\nconst biz   = Array.isArray(raw) ? raw[0] : (Array.isArray(raw.body) ? raw.body[0] : raw);\n\nconst chatId = biz?.telegram_chat_id\n  || notif?.telegram_chat_id\n  || notif?.raw_payload?.telegram_chat_id\n  || null;\n\nreturn [{ json: { ...notif, telegram_chat_id: chatId ? String(chatId) : null } }];"
+      },
+      "id": "30b8f20c-99ab-4de7-b3d9-beb5dd0d6cdd",
+      "name": "Merge Telegram ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6992,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "tg-cond-01",
+              "leftValue": "={{ $json.telegram_chat_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "49bb6a22-29bd-404f-ab49-c420aa741e82",
+      "name": "Has Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        7232,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "text": "={{ $json.notificationMsg }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "dea6d653-9e98-4840-9311-1e6020f37152",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        7472,
+        3328
+      ],
+      "webhookId": "dd9b12f6-2fae-4ce8-8e22-d2040098d6cc",
+      "credentials": {
+        "telegramApi": {
+          "id": "owK50GCYyhb7W6bO",
+          "name": "Nazissh Telegram account 3"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ...$input.first().json, telegram_skipped: true } }];"
+      },
+      "id": "1e8043b4-9a29-4a53-8ab6-66f986543733",
+      "name": "Skip No Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7472,
+        3568
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: $json.isNew ? 'Lead captured' : 'Lead updated', lead_score: $json.lead_score, lead_grade: $json.lead_grade, priority: $json.lead_priority }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "f22c371e-4fef-4b09-92a0-5377f0fc1ecb",
+      "name": "Return 200 Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        7712,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Check If Customer').first().json;\nconst raw = $input.first().json;\nconst saved = Array.isArray(raw) ? raw[0] : (Array.isArray(raw.body) ? raw.body[0] : raw);\n\nconst lead_id = saved?.id || saved?.lead_id || null;\n\nreturn [{\n  json: {\n    ...d,\n    lead_id,\n    activity: {\n      business_id:   d.business_id,\n      lead_id:       lead_id,\n      action:        'created',\n      lead_score:    d.lead_score,\n      lead_grade:    d.lead_grade,\n      lead_priority: d.lead_priority,\n      source:        d.source,\n      order_total:   d.order_total,\n      note:          `Lead created via ${d.source}. Score: ${d.lead_score}/100 (${d.lead_grade})`,\n      created_at:    new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "41ecf398-d1a4-46d0-a746-dd2e66ca693c",
+      "name": "Prepare Activity Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6512,
+        3680
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/lead_activities",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.activity) }}",
+        "options": {}
+      },
+      "id": "8f2687ae-6d65-4ff3-991f-85a708d56aef",
+      "name": "Log Lead Activity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6752,
+        3680
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Lead Capture Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Lookup Business by Secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Business by Secret": {
+      "main": [
+        [
+          {
+            "node": "Extract Business ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Business ID": {
+      "main": [
+        [
+          {
+            "node": "Business Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business Found?": {
+      "main": [
+        [
+          {
+            "node": "Score Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return 401 Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Lead": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Customer": {
+      "main": [
+        [
+          {
+            "node": "Check If Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Customer": {
+      "main": [
+        [
+          {
+            "node": "Is Existing Customer?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Existing Customer?": {
+      "main": [
+        [
+          {
+            "node": "Skip Existing Customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert New Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Existing Customer": {
+      "main": [
+        [
+          {
+            "node": "Return 200 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert New Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Activity Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Notification": {
+      "main": [
+        [
+          {
+            "node": "Get Business Telegram ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business Telegram ID": {
+      "main": [
+        [
+          {
+            "node": "Merge Telegram ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Telegram ID": {
+      "main": [
+        [
+          {
+            "node": "Has Telegram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Telegram?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip No Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Alert": {
+      "main": [
+        [
+          {
+            "node": "Return 200 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip No Telegram": {
+      "main": [
+        [
+          {
+            "node": "Return 200 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Activity Log": {
+      "main": [
+        [
+          {
+            "node": "Log Lead Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "8e2fb4b8-94ca-413f-9b2d-ab53f3052b66",
+  "meta": {
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "1_3JvmkS_3vI087RYdpni",
+  "tags": []
+}
