@@ -1,0 +1,1645 @@
+{
+  "name": "FINAL_1WF_Business_registration_FIX",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "business-registration",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "56a0a924-3f02-436a-b3c5-433a4e5cf0d3",
+      "name": "Business Registration Webhook v2",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -2720,
+        2624
+      ],
+      "webhookId": "business-registration-v2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// FIX #1 — Comprehensive input validation\nconst raw = $input.first().json;\nconst body = raw.body || raw;\nconst errors = [];\nconst missing_fields = [];\nconst required = ['business_name', 'email', 'website_url'];\nfor (const field of required) {\n  if (!body[field] || String(body[field]).trim() === '') {\n    missing_fields.push(field);\n  }\n}\nconst telegramRaw = body.telegram_chat_id || body.telegram_id || '';\nif (!telegramRaw || String(telegramRaw).trim() === '') {\n  missing_fields.push('telegram_id');\n}\nconst ck = body.consumer_key || body.wc_consumer_key || body.woocommerce_consumer_key || '';\nconst cs = body.consumer_secret || body.wc_consumer_secret || body.woocommerce_consumer_secret || '';\nif (!ck) missing_fields.push('consumer_key');\nif (!cs) missing_fields.push('consumer_secret');\nif (missing_fields.length > 0) {\n  return [{ json: { valid: false, errors: ['Missing required fields: ' + missing_fields.join(', ')], missing_fields } }];\n}\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nif (!emailRegex.test(body.email)) { errors.push('Invalid email format'); }\nconst telegramId = String(telegramRaw).trim();\nif (!/^-?\\d+$/.test(telegramId)) { errors.push('telegram_id must be a numeric Telegram chat ID'); }\nconst urlRegex = /^https?:\\/\\/.+/;\nif (!urlRegex.test(body.website_url)) { errors.push('website_url must start with http:// or https://'); }\nif (!ck.startsWith('ck_')) { errors.push('consumer_key must start with ck_'); }\nif (!cs.startsWith('cs_')) { errors.push('consumer_secret must start with cs_'); }\nif (errors.length > 0) { return [{ json: { valid: false, errors, missing_fields: [] } }]; }\nconst cleanUrl = String(body.website_url).trim().replace(/\\/$/, '');\nconst domain = cleanUrl.replace(/^https?:\\/\\//, '').replace(/^www\\./, '').split('/')[0].split('?')[0];\nreturn [{\n  json: {\n    valid: true, errors: [], missing_fields: [],\n    business_name: String(body.business_name).trim(),\n    email: String(body.email).trim().toLowerCase(),\n    telegram_chat_id: telegramId,\n    website_url: cleanUrl,\n    domain: domain,\n    consumer_key: ck,\n    consumer_secret: cs,\n    business_description: body.business_description || '',\n    industry: body.industry || ''\n  }\n}];"
+      },
+      "id": "28a12928-92ab-44a5-9df5-e451979408dc",
+      "name": "Validate Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2496,
+        2624
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-valid-01",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "67f53709-aad4-473f-8109-c846fbca74fa",
+      "name": "IF Validation Passes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2272,
+        2624
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'Validation failed', errors: $json.errors, missing_fields: $json.missing_fields }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "58191d8e-e479-4f8d-9269-dfe2fe123fb0",
+      "name": "Return 400 Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -2048,
+        2720
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'Business already registered', message: 'A business with this email already exists' }) }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "a30c282a-793a-4410-aa24-14ed3550665b",
+      "name": "Return 409 Duplicate Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        2720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-dup-err-01",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "duplicate",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f8d62d87-168c-4953-a14e-a303043c8710",
+      "name": "IF Duplicate Error",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Validate Inputs').first().json;\nfunction randomHex(len) {\n  const chars = '0123456789abcdef';\n  let result = '';\n  for (let i = 0; i < len; i++) { result += chars[Math.floor(Math.random() * 16)]; }\n  return result;\n}\nconst ts = Date.now().toString(16);\nconst rand1 = randomHex(48) + ts;\nconst rand2 = randomHex(48) + ts.split('').reverse().join('');\nreturn [{\n  json: {\n    ...data,\n    status: 'active',\n    registered_at: new Date().toISOString(),\n    api_key: rand1.substring(0, 64),\n    webhook_secret: rand2.substring(0, 64)\n  }\n}];"
+      },
+      "id": "e53bc2c9-2f7a-42d9-b47e-53e369d7c925",
+      "name": "Generate Secure Credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1600,
+        2448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_name: $json.business_name || null, email: $json.email, telegram_chat_id: $json.telegram_chat_id || null, website_url: $json.website_url || null, domain: $json.domain || null, wc_consumer_key_encrypted: $json.consumer_key || null, wc_consumer_secret_encrypted: $json.consumer_secret || null, status: $json.status, registered_at: $json.registered_at, sync_status: 'pending' }) }}",
+        "options": {}
+      },
+      "id": "bad01631-2216-414b-bd23-d59ca972c232",
+      "name": "Store Business Profile HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1376,
+        2448
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nif (raw.error || raw.message) return [{ json: raw }];\nif (raw.data && typeof raw.data === 'string') {\n  try { return [{ json: JSON.parse(raw.data) }]; } catch(e) {}\n}\nif (Array.isArray(raw)) return [{ json: raw[0] || {} }];\nreturn [{ json: raw }];"
+      },
+      "id": "82b4a823-8548-4194-83cf-bc5c911c79b5",
+      "name": "Store Business Profile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1152,
+        2448
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-profile-01",
+              "leftValue": "={{ $json.error !== undefined ? 'error' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "608f1a4f-83e9-4b1f-a6c1-69bca1b1063b",
+      "name": "IF Profile Stored OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -928,
+        2448
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'Database error', message: 'Unable to create business profile. Please try again.', detail: $json.error }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "6b1640ae-1302-4643-b9de-57df51aaf93b",
+      "name": "Return 500 Profile Store Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        2496
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/api_credentials",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_id: $('Store Business Profile').first().json.business_id, api_key: $('Generate Secure Credentials').first().json.api_key, webhook_secret: $('Generate Secure Credentials').first().json.webhook_secret, is_active: true }) }}",
+        "options": {}
+      },
+      "id": "c6ad069e-5592-46c5-9146-07dc2f9c747e",
+      "name": "Store API Credentials",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -704,
+        2304
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/api_credentials",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "business_id",
+              "value": "=eq.{{ $('Store Business Profile').first().json.business_id }}"
+            },
+            {
+              "name": "is_active",
+              "value": "eq.true"
+            },
+            {
+              "name": "select",
+              "value": "business_id,api_key,webhook_secret,is_active"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "37267796-a145-4470-beb7-0475a65ce9c3",
+      "name": "Get API Credentials HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -480,
+        2304
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nif (raw.error || raw.message) return [{ json: raw }];\nif (raw.data && typeof raw.data === 'string') {\n  try { return [{ json: JSON.parse(raw.data) }]; } catch(e) {}\n}\nif (Array.isArray(raw)) return [{ json: raw[0] || {} }];\nreturn [{ json: raw }];"
+      },
+      "id": "c0a7f4f3-9b9b-4d72-9cca-56cc2a6f3909",
+      "name": "Get API Credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        2304
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-creds-01",
+              "leftValue": "={{ $json.error !== undefined ? 'error' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1ea06337-5e5f-491d-93dd-9dad0f2b6e0a",
+      "name": "IF Creds Stored OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        2304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "business_id",
+              "value": "=eq.{{ $('Store Business Profile').first().json.business_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9a0569d8-c255-4c94-b0f6-1d3e45a27e5e",
+      "name": "Rollback Delete Business Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        192,
+        2816
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'Database error', message: 'Unable to store API credentials. Registration rolled back. Please try again.' }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "7de765e7-f6cb-4086-b06e-be1acfac2f55",
+      "name": "Return 500 Creds Store Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        416,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "business_id",
+              "value": "=eq.{{ $('Store Business Profile').first().json.business_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sync_status: 'syncing', sync_started_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "bede93db-dccc-4206-9806-14a25243f5d7",
+      "name": "Mark Progress Syncing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        192,
+        1920
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Validate Inputs').first().json.email }}",
+        "subject": "Welcome to Business Automation Platform - Your Account is Ready",
+        "message": "=<h2>Welcome to the Business Automation Platform!</h2><p>Dear {{ $('Validate Inputs').first().json.business_name }},</p><p>Your business has been successfully registered.</p><h3>Your Account Details:</h3><ul><li><strong>Business ID:</strong> {{ $('Store Business Profile').first().json.business_id }}</li><li><strong>API Key:</strong> {{ $('Get API Credentials').first().json.api_key }}</li><li><strong>Lead Capture Webhook:</strong> https://n8n.mtsolutions.fun/webhook/lead-capture</li></ul><p>Best regards,<br>The BizFlow Team</p>",
+        "options": {}
+      },
+      "id": "42b7f897-cb00-442e-93b1-8cc828c715c9",
+      "name": "Send Gmail Welcome",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        416,
+        1488
+      ],
+      "webhookId": "176429bb-cfc3-47b0-8cec-5fdead6fc0db",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gU8lbcMJEtRoLlTS",
+          "name": "Gmail account MTK"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Validate Inputs').first().json.telegram_chat_id }}",
+        "text": "=🎉 *Welcome to BizFlow!*\n\nYour business *{{ $('Validate Inputs').first().json.business_name }}* is now registered and syncing.\n\n📋 *Your Details:*\n• Business ID: `{{ $('Store Business Profile').first().json.business_id }}`\n• API Key: `{{ $('Get API Credentials').first().json.api_key }}`\n\n💬 *You can now ask me:*\n• \"What are my sales today?\"\n• \"Check inventory\"\n• \"Show this week's report\"\n\nType anything to get started! 🚀",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "50ae519c-6254-40dd-ba26-a03609120ae0",
+      "name": "Send Telegram Welcome",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        416,
+        1872
+      ],
+      "webhookId": "ee48484f-0f94-46e0-af32-df60d144e717",
+      "credentials": {
+        "telegramApi": {
+          "id": "owK50GCYyhb7W6bO",
+          "name": "Nazissh Telegram account 3"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate Inputs').first().json.website_url }}/wp-json/wc/v3/webhooks",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "consumer_key",
+              "value": "={{ $('Validate Inputs').first().json.consumer_key }}"
+            },
+            {
+              "name": "consumer_secret",
+              "value": "={{ $('Validate Inputs').first().json.consumer_secret }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: 'BizFlow Order Created', topic: 'order.created', delivery_url: 'https://n8n.mtsolutions.fun/webhook/lead-capture', secret: $('Get API Credentials').first().json.webhook_secret, status: 'active' }) }}",
+        "options": {}
+      },
+      "id": "7a7dd90c-f32f-47fd-b3cc-12220c4a19eb",
+      "name": "Create WooCommerce Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        1680
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const creds = $('Validate Inputs').first().json;\nreturn [{\n  json: {\n    _order_url: creds.website_url.replace(/\\/+$/, '') + '/wp-json/wc/v3/orders',\n    _order_ck: creds.consumer_key,\n    _order_cs: creds.consumer_secret,\n    _order_page: 1,\n    _order_per_page: 50,\n    _order_total_fetched: 0,\n    _order_line_items_count: 0,\n    _order_has_more: true\n  }\n}];"
+      },
+      "id": "71c9439e-69c5-444b-b464-0539df1dcbf9",
+      "name": "Prepare Order Fetch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        2432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let state;\ntry { state = $('Prepare Next Orders Page').first().json; } catch (e) { state = $('Prepare Order Fetch').first().json; }\nconst httpResp = $input.first().json;\nconst business_id = $('Store Business Profile').first().json.business_id;\nif (httpResp.error || (httpResp.statusCode && httpResp.statusCode >= 400)) {\n  return [{ json: { ...state, _order_has_more: false, _order_batch: [], _order_line_items_batch: [], _order_refunds_batch: [], _order_error: httpResp.error || ('HTTP ' + httpResp.statusCode) } }];\n}\nconst orders = Array.isArray(httpResp.body) ? httpResp.body : [];\nconst totalPages = parseInt((httpResp.headers || {})['x-wp-totalpages'] || '1');\nconst hasMore = orders.length >= state._order_per_page && state._order_page < totalPages;\nconst orderBatch = orders.map(o => ({\n  business_id, wc_order_id: o.id, order_number: String(o.number || o.id),\n  status: o.status || 'pending', currency: o.currency || 'PKR',\n  total: parseFloat(o.total) || 0, total_refunded: parseFloat(o.total_refunded) || 0,\n  subtotal: parseFloat(o.subtotal) || 0, tax_total: parseFloat(o.total_tax) || 0,\n  shipping_total: parseFloat(o.shipping_total) || 0, discount_total: parseFloat(o.discount_total) || 0,\n  customer_email: o.billing && o.billing.email ? o.billing.email : null,\n  customer_phone: o.billing && o.billing.phone ? o.billing.phone : null,\n  customer_name: o.billing ? ((o.billing.first_name || '') + ' ' + (o.billing.last_name || '')).trim() || null : null,\n  billing_address: o.billing || {}, shipping_address: o.shipping || {}, line_items: o.line_items || [],\n  payment_method: o.payment_method || null, payment_method_title: o.payment_method_title || null,\n  transaction_id: o.transaction_id || null, date_created: o.date_created || null,\n  date_modified: o.date_modified || null, date_completed: o.date_completed || null,\n  date_paid: o.date_paid || null, last_synced_at: new Date().toISOString()\n}));\nconst lineItemsBatch = [];\nfor (const o of orders) {\n  for (const item of (o.line_items || [])) {\n    if (!item.id) continue;\n    lineItemsBatch.push({\n      business_id, wc_order_id: o.id, wc_order_item_id: item.id,\n      product_id: item.product_id || null, variation_id: item.variation_id || null,\n      product_name: (item.name || 'Unknown').substring(0, 500), sku: item.sku || null,\n      quantity: parseInt(item.quantity) || 1, price: parseFloat(item.price) || 0,\n      subtotal: parseFloat(item.subtotal) || 0, total: parseFloat(item.total) || 0,\n      tax: parseFloat(item.total_tax) || 0, order_date: o.date_created || null,\n      order_status: o.status || null, last_synced_at: new Date().toISOString()\n    });\n  }\n}\nconst refundsBatch = [];\nfor (const o of orders) {\n  for (const refund of (o.refunds || [])) {\n    if (!refund.id) continue;\n    refundsBatch.push({\n      business_id, wc_refund_id: refund.id, wc_order_id: o.id,\n      reason: refund.reason || null, total: Math.abs(parseFloat(refund.total) || 0),\n      last_synced_at: new Date().toISOString()\n    });\n  }\n}\nreturn [{ json: {\n  ...state, _order_page: state._order_page + 1,\n  _order_total_fetched: (state._order_total_fetched || 0) + orders.length,\n  _order_line_items_count: (state._order_line_items_count || 0) + lineItemsBatch.length,\n  _order_refunds_count: (state._order_refunds_count || 0) + refundsBatch.length,\n  _order_has_more: hasMore, _order_batch: orderBatch,\n  _order_line_items_batch: lineItemsBatch, _order_refunds_batch: refundsBatch\n} }];"
+      },
+      "id": "9139f34d-dcf1-485f-9f1a-1d6502b542d9",
+      "name": "Process Orders Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        2352
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders?on_conflict=business_id,wc_order_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._order_batch || []) }}",
+        "options": {}
+      },
+      "id": "23b1eb02-ab93-474f-bdd6-9072679de378",
+      "name": "Insert Orders to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1088,
+        2352
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const business_id = $('Store Business Profile').first().json.business_id;\nlet orderBatch = [];\ntry { orderBatch = $('Process Orders Page').first().json._order_batch || []; } catch(e) {}\nconst seen = new Set();\nconst customers = [];\nfor (const order of orderBatch) {\n  if (!order.customer_email) continue;\n  const emailKey = order.customer_email.toLowerCase();\n  if (seen.has(emailKey)) continue;\n  seen.add(emailKey);\n  customers.push({ business_id, wc_customer_id: order.wc_order_id || null, name: order.customer_name || 'Unknown', email: order.customer_email, phone_number: order.customer_phone || null });\n}\nif (customers.length === 0) { return [{ json: { business_id, customers_found: 0, skipped: true } }]; }\nreturn customers.map(c => ({ json: c }));"
+      },
+      "id": "7e064372-c461-483d-b2f8-c91865fcc6ea",
+      "name": "Extract Unique Customers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        2624
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/customers?on_conflict=business_id,email",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_id: $json.business_id, wc_customer_id: $json.wc_customer_id || null, name: $json.name || null, email: $json.email || null, phone_number: $json.phone_number || null }) }}",
+        "options": {}
+      },
+      "id": "4755a763-d91f-417c-9486-ca404897aeaa",
+      "name": "Insert Customers to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2208,
+        2624
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const warnings = [];\nlet products_count = 0;\ntry { const pd = $('Finalize Products Sync').first().json; products_count = pd.products_count || 0; if (pd.products_sync_error) warnings.push('Products: ' + pd.products_sync_error); } catch (e) { warnings.push('Products sync unavailable'); }\nlet orders_count = 0;\ntry { const od = $('Process Orders Page').first().json; orders_count = od._order_total_fetched || 0; if (od._order_error) warnings.push('Orders: ' + od._order_error); } catch (e) { warnings.push('Orders sync unavailable'); }\nlet line_items_count = 0;\ntry { line_items_count = $('Process Orders Page').first().json._order_line_items_count || 0; } catch (e) {}\nlet customers_count = 0;\ntry { customers_count = $('Insert Customers to Supabase').all().filter(i => !i.json.error).length; } catch (e) {}\nlet webhook_created = false;\ntry { const wh = $('Create WooCommerce Webhook').first().json; webhook_created = !!(wh && wh.id); if (!webhook_created) warnings.push('WC webhook: ' + (wh.error || 'failed')); } catch (e) { warnings.push('WC webhook failed'); }\nreturn [{ json: {\n  success: true,\n  business_id: $('Store Business Profile').first().json.business_id,\n  api_key: $('Get API Credentials').first().json.api_key,\n  message: warnings.length > 0 ? 'Business registered with warnings' : 'Business registered successfully',\n  sync_results: { products_synced: products_count, orders_synced: orders_count, line_items_synced: line_items_count, customers_synced: customers_count, webhook_created },\n  warnings, registered_at: $('Store Business Profile').first().json.registered_at,\n  lead_capture_webhook_url: 'https://n8n.mtsolutions.fun/webhook/lead-capture'\n} }];"
+      },
+      "id": "dd23d10e-a739-4db2-889b-529c89810c6d",
+      "name": "Aggregate Sync Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        2624
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "business_id",
+              "value": "=eq.{{ $('Store Business Profile').first().json.business_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sync_status: 'completed', sync_completed_at: new Date().toISOString(), products_count: $json.sync_results.products_synced, orders_count: $json.sync_results.orders_synced }) }}",
+        "options": {}
+      },
+      "id": "ee71fee4-b1c1-40b5-a800-ca9d7357dd82",
+      "name": "Mark Progress Completed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        2624
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, business_id: $('Store Business Profile').first().json.business_id, api_key: $('Get API Credentials').first().json.api_key, message: 'Business registered successfully! Data sync running in background.', registered_at: $('Store Business Profile').first().json.registered_at, lead_capture_webhook_url: 'https://n8n.mtsolutions.fun/webhook/lead-capture' }) }}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "8f420fb1-697d-4724-8754-b446ffb90e5a",
+      "name": "Return 201 Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        416,
+        2624
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "business_id"
+            },
+            {
+              "name": "email",
+              "value": "eq.{{ $json.email }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "cf3a0d8d-dcdf-46fe-b5f3-5196222409ac",
+      "name": "Check Duplicate Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2048,
+        2528
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-email-exists-01",
+              "leftValue": "={{ Array.isArray($json.body) ? $json.body.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "33d022e5-9fba-4f2a-a062-40f9be1623f1",
+      "name": "IF Email Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1824,
+        2528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const creds = $('Validate Inputs').first().json;\nreturn [{\n  json: {\n    _wc_url: creds.website_url.replace(/\\/+$/, '') + '/wp-json/wc/v3/products',\n    _wc_ck: creds.consumer_key, _wc_cs: creds.consumer_secret,\n    _wc_page: 1, _wc_per_page: 100, _wc_total_fetched: 0, _wc_has_more: true\n  }\n}];"
+      },
+      "id": "abb5b750-9315-40d5-8480-e0db72736a03",
+      "name": "Prepare Product Fetch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        2064
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json._wc_url }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "page",
+              "value": "={{ $json._wc_page }}"
+            },
+            {
+              "name": "per_page",
+              "value": "={{ $json._wc_per_page }}"
+            },
+            {
+              "name": "status",
+              "value": "publish"
+            },
+            {
+              "name": "consumer_key",
+              "value": "={{ $json._wc_ck }}"
+            },
+            {
+              "name": "consumer_secret",
+              "value": "={{ $json._wc_cs }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "89b08fa9-4b25-4cf1-898e-93519753b35b",
+      "name": "Fetch Products Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        2064
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "let state;\ntry { state = $('Prepare Next Product Page').first().json; } catch (e) { state = $('Prepare Product Fetch').first().json; }\nconst httpResp = $input.first().json;\nconst business_id = $('Store Business Profile').first().json.business_id;\nif (httpResp.error || (httpResp.statusCode && httpResp.statusCode >= 400)) {\n  return [{ json: { ...state, _wc_has_more: false, _wc_batch: [], _wc_error: httpResp.error || ('HTTP ' + httpResp.statusCode) } }];\n}\nconst products = Array.isArray(httpResp.body) ? httpResp.body : [];\nconst totalPages = parseInt((httpResp.headers || {})['x-wp-totalpages'] || '1');\nconst hasMore = products.length >= state._wc_per_page && state._wc_page < totalPages;\nconst batch = products.map(p => ({\n  business_id, wc_product_id: p.id, name: (p.name || 'Unknown').substring(0, 500),\n  slug: (p.slug || '').substring(0, 500) || null, sku: p.sku || null,\n  price: parseFloat(p.price) || 0, regular_price: parseFloat(p.regular_price) || 0,\n  sale_price: p.sale_price ? parseFloat(p.sale_price) : null,\n  stock_quantity: p.stock_quantity || 0, stock_status: p.stock_status || 'instock',\n  description: (p.description || '').substring(0, 5000) || null,\n  short_description: (p.short_description || '').substring(0, 2000) || null,\n  categories: p.categories || [],\n  images: (p.images || []).map(img => ({ id: img.id, src: img.src, alt: img.alt })),\n  last_synced_at: new Date().toISOString()\n}));\nreturn [{ json: { ...state, _wc_page: state._wc_page + 1, _wc_total_fetched: state._wc_total_fetched + products.length, _wc_has_more: hasMore, _wc_batch: batch } }];"
+      },
+      "id": "aea67c37-adb2-4912-9d8a-56fc8f24049f",
+      "name": "Process Products Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_products",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal,resolution=merge-duplicates"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._wc_batch || []) }}",
+        "options": {}
+      },
+      "id": "b6e25351-5054-43e9-9a3e-d15b5bce5f7d",
+      "name": "Insert Products Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1088,
+        2000
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "more-products-check",
+              "leftValue": "={{ $('Process Products Page').first().json._wc_has_more }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2e605eab-67bc-446f-aaac-8b8730976f7c",
+      "name": "More Products?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const state = $('Process Products Page').first().json;\nreturn [{ json: { ...state } }];"
+      },
+      "id": "ce37cc1d-f365-4f74-b3c5-9bfe3aa64ef7",
+      "name": "Prepare Next Product Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        1952
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_order_items?on_conflict=business_id,wc_order_id,wc_order_item_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Process Orders Page').first().json._order_line_items_batch || []) }}",
+        "options": {}
+      },
+      "id": "07fd7a32-9cb4-447c-baa8-b47196e5fdc1",
+      "name": "Insert Line Items to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1312,
+        2352
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "let state;\ntry { state = $('Process Products Page').first().json; } catch (e) { state = { _wc_total_fetched: 0 }; }\nreturn [{ json: { products_count: state._wc_total_fetched || 0, products_sync_error: state._wc_error || null } }];"
+      },
+      "id": "12a37d0d-c5db-428c-a073-986bdd151e86",
+      "name": "Finalize Products Sync",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        2144
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json._order_url }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "page",
+              "value": "={{ $json._order_page }}"
+            },
+            {
+              "name": "per_page",
+              "value": "={{ $json._order_per_page }}"
+            },
+            {
+              "name": "consumer_key",
+              "value": "={{ $json._order_ck }}"
+            },
+            {
+              "name": "consumer_secret",
+              "value": "={{ $json._order_cs }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "92c9c9d2-1849-4200-b6c7-be685e27c79a",
+      "name": "Fetch WC Orders HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        2432
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_refunds?on_conflict=business_id,wc_refund_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Process Orders Page').first().json._order_refunds_batch || []) }}",
+        "options": {}
+      },
+      "id": "acee4f31-626e-4d73-8ad7-7b09b1d58e29",
+      "name": "Insert Refunds to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1536,
+        2352
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "more-orders-cond-001",
+              "leftValue": "={{ $('Process Orders Page').first().json._order_has_more }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "512dbe18-ab91-4df1-b2f1-d43c4042d48b",
+      "name": "More Orders?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        2352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const state = $('Process Orders Page').first().json;\nreturn [{ json: { ...state } }];"
+      },
+      "id": "b5882817-caf5-405b-80c6-7c1e14de3531",
+      "name": "Prepare Next Orders Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        2432
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Business Registration Webhook v2": {
+      "main": [
+        [
+          {
+            "node": "Validate Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Inputs": {
+      "main": [
+        [
+          {
+            "node": "IF Validation Passes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Validation Passes": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return 400 Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate Email": {
+      "main": [
+        [
+          {
+            "node": "IF Email Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Email Exists": {
+      "main": [
+        [
+          {
+            "node": "Return 409 Duplicate Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Secure Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Secure Credentials": {
+      "main": [
+        [
+          {
+            "node": "Store Business Profile HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Business Profile HTTP": {
+      "main": [
+        [
+          {
+            "node": "Store Business Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Business Profile": {
+      "main": [
+        [
+          {
+            "node": "IF Profile Stored OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Profile Stored OK": {
+      "main": [
+        [
+          {
+            "node": "Store API Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Duplicate Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Duplicate Error": {
+      "main": [
+        [
+          {
+            "node": "Return 409 Duplicate Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return 500 Profile Store Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store API Credentials": {
+      "main": [
+        [
+          {
+            "node": "Get API Credentials HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get API Credentials HTTP": {
+      "main": [
+        [
+          {
+            "node": "Get API Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get API Credentials": {
+      "main": [
+        [
+          {
+            "node": "IF Creds Stored OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Creds Stored OK": {
+      "main": [
+        [
+          {
+            "node": "Mark Progress Syncing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rollback Delete Business Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rollback Delete Business Profile": {
+      "main": [
+        [
+          {
+            "node": "Return 500 Creds Store Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Progress Syncing": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail Welcome",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Telegram Welcome",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create WooCommerce Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Product Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Order Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return 201 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Product Fetch": {
+      "main": [
+        [
+          {
+            "node": "Fetch Products Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Products Page": {
+      "main": [
+        [
+          {
+            "node": "Process Products Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Products Page": {
+      "main": [
+        [
+          {
+            "node": "Insert Products Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Products Batch": {
+      "main": [
+        [
+          {
+            "node": "More Products?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "More Products?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Next Product Page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finalize Products Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Next Product Page": {
+      "main": [
+        [
+          {
+            "node": "Fetch Products Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Order Fetch": {
+      "main": [
+        [
+          {
+            "node": "Fetch WC Orders HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch WC Orders HTTP": {
+      "main": [
+        [
+          {
+            "node": "Process Orders Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Orders Page": {
+      "main": [
+        [
+          {
+            "node": "Insert Orders to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Orders to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Insert Line Items to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Line Items to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Insert Refunds to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Refunds to Supabase": {
+      "main": [
+        [
+          {
+            "node": "More Orders?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "More Orders?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Next Orders Page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Unique Customers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Next Orders Page": {
+      "main": [
+        [
+          {
+            "node": "Fetch WC Orders HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Unique Customers": {
+      "main": [
+        [
+          {
+            "node": "Insert Customers to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Customers to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Sync Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Sync Results": {
+      "main": [
+        [
+          {
+            "node": "Mark Progress Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "4c9ef197-9951-4435-8952-d0583fec5a24",
+  "meta": {
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "fbzP1q3AdXQ4sekZIuQ6T",
+  "tags": []
+}
