@@ -1,0 +1,304 @@
+{
+  "name": "FW8_Sales_Analytics_Final",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: $json.success, reply: $json.reply, period: $json.period, total_orders: $json.total_orders, total_revenue: $json.total_revenue, session_id: $json.session_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "d49f0ac0-4ec8-465a-81ce-da5f32c9ff28",
+      "name": "Return Answer",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        5840,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const openaiResp = $input.first().json;\nconst analyticsData = $('Calculate Analytics').first().json;\n\nlet reply = '';\ntry {\n  if (openaiResp.message && openaiResp.message.content) {\n    reply = openaiResp.message.content;\n  } else if (openaiResp.choices && openaiResp.choices[0]) {\n    reply = openaiResp.choices[0].message.content || '';\n  } else if (openaiResp.text) {\n    reply = openaiResp.text;\n  } else {\n    reply = analyticsData.summary || 'Data available but AI response failed.';\n  }\n} catch(e) {\n  reply = analyticsData.summary || 'Error: ' + e.message;\n}\n\nreturn [{\n  json: {\n    success: true,\n    reply,\n    period: analyticsData.period || 'all_time',\n    total_orders: analyticsData.total_orders || 0,\n    total_revenue: analyticsData.total_revenue || 0,\n    session_id: analyticsData.session_id || String(Date.now())\n  }\n}];"
+      },
+      "id": "ae3fa5f2-dc14-4b21-9055-d602161f4976",
+      "name": "Extract Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5664,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are BizFlow AI — an expert business intelligence assistant for a WooCommerce store in Pakistan. You think like a business consultant.\n\n═══ LANGUAGE ═══\nMatch user's language: Urdu → Urdu, English → English, Mix → Mix. Roman Urdu preferred.\n\n═══ RESPONSE FORMAT ═══\n• Bullet points for all lists.\n• Bold for important numbers.\n• Max 15 lines per response.\n• End EVERY response with 💡 Tip: (one specific action).\n• Never use # headers.\n\n═══ ALWAYS INCLUDE ═══\n• Total revenue + total orders.\n• Best performing day/product.\n• One warning (inventory, cancellation, or sales drop).\n• One AI-Powered Opportunity.\n\n═══ STRICT RULES ═══\n• You are speaking to the BUSINESS OWNER only.\n• NEVER suggest WhatsApp, customer contact, or bulk order calls.\n• Show prices as DATA with strategy recommendations.\n• All amounts in PKR (Rs.).\n• CRITICAL: If the data summary says '0 orders' or 'koi order nahi aya' for a period, you MUST only say that period had zero orders. Do NOT reference any other period's data. Do NOT make up or estimate any numbers. Simply state: 'Is period mein koi order record nahi mila.'\n• NEVER hallucinate revenue, orders, or product data.\n• ONLY analyze the EXACT data provided in Live Business Data. Nothing else.",
+              "role": "system"
+            },
+            {
+              "content": "=User question: {{ $json.message }}\n\nLive Business Data:\n{{ $json.summary }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.2
+        }
+      },
+      "id": "4d6c0f43-eecf-41a0-b27b-229668a214cd",
+      "name": "GPT Analysis",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        5408,
+        960
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "PQfPyqdpbAK30RzL",
+          "name": "OpenAi account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const classifyData = $('Classify & Build Query').first().json;\nconst rawInput = $input.all();\n\nlet orders = [];\nfor (const item of rawInput) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    orders = orders.concat(d);\n  } else if (d && (d.wc_order_id || d.id || d.status)) {\n    orders.push(d);\n  } else if (d && Array.isArray(d.data)) {\n    orders = orders.concat(d.data);\n  }\n}\n\n// ✅ If DB returned nothing at all\nif (orders.length === 0) {\n  const summary = `${classifyData.intentLabel}: Database mein is business ka koi bhi order record nahi mila.\\nDate range checked: ${classifyData.dateFrom.split('T')[0]} to ${classifyData.dateTo.split('T')[0]}`;\n  return [{ json: { ...classifyData, summary, total_orders: 0, total_revenue: 0 } }];\n}\n\nconst dateFrom = new Date(classifyData.dateFrom);\nconst dateTo = new Date(classifyData.dateTo);\n\nconst filteredOrders = classifyData.period === 'all_time'\n  ? orders\n  : orders.filter(o => {\n      const d = new Date(o.date_created);\n      return d >= dateFrom && d <= dateTo;\n    });\n\n// ✅ NO fallback — empty period = 0 orders, honest message\nconst useOrders = filteredOrders;\n\nif (useOrders.length === 0) {\n  const summary = `${classifyData.intentLabel} (${classifyData.dateFrom.split('T')[0]} se ${classifyData.dateTo.split('T')[0]} tak):\\n\\nIs period mein koi order nahi aya.\\nDatabase mein total records: ${orders.length}\\nLekin requested date range mein: 0 orders`;\n  return [{ json: { ...classifyData, summary, total_orders: 0, total_revenue: 0 } }];\n}\n\nlet totalRevenue = 0, completedRevenue = 0, pendingRevenue = 0;\nconst statusCount = {}, productSales = {}, dailyRevenue = {};\n\nfor (const o of useOrders) {\n  const amount = parseFloat(o.total) || 0;\n  totalRevenue += amount;\n  const status = (o.status || 'unknown').toLowerCase();\n  statusCount[status] = (statusCount[status] || 0) + 1;\n  if (['completed','processing','on-hold'].includes(status)) completedRevenue += amount;\n  else if (status === 'pending') pendingRevenue += amount;\n\n  const dateStr = (o.date_created || '').replace(' ', 'T');\n  if (dateStr) {\n    const day = dateStr.substring(0, 10);\n    if (!dailyRevenue[day]) dailyRevenue[day] = { revenue: 0, orders: 0 };\n    dailyRevenue[day].revenue += amount;\n    dailyRevenue[day].orders += 1;\n  }\n\n  const lineItems = Array.isArray(o.line_items) ? o.line_items : [];\n  for (const item of lineItems) {\n    const name = item.name || 'Unknown';\n    const qty = parseInt(item.quantity) || 1;\n    const subtotal = parseFloat(item.subtotal || item.total) || 0;\n    if (!productSales[name]) productSales[name] = { qty: 0, revenue: 0 };\n    productSales[name].qty += qty;\n    productSales[name].revenue += subtotal;\n  }\n}\n\nconst fmt = n => 'Rs.' + Math.round(n).toLocaleString();\nconst topProducts = Object.entries(productSales)\n  .sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5)\n  .map(([name, data]) => `• ${name}: ${fmt(data.revenue)} (${data.qty} units)`);\n\nconst statusLines = Object.entries(statusCount)\n  .sort((a, b) => b[1] - a[1]).map(([s, c]) => `${s}: ${c}`);\n\nconst avgOrderValue = Math.round(totalRevenue / useOrders.length);\nconst sortedDays = Object.entries(dailyRevenue).sort((a, b) => b[1].revenue - a[1].revenue);\nconst bestDay = sortedDays[0];\nconst top10Days = sortedDays.slice(0, 10)\n  .map(([date, data]) => `• ${date}: ${fmt(data.revenue)} (${data.orders} orders)`);\n\nconst summary = `${classifyData.intentLabel} (${classifyData.dateFrom.split('T')[0]} se ${classifyData.dateTo.split('T')[0]} tak):\\n\\nTotal Orders: ${useOrders.length}\\nTotal Revenue: ${fmt(totalRevenue)}\\nActive Revenue (completed+processing+on-hold): ${fmt(completedRevenue)}\\nAverage Order Value: ${fmt(avgOrderValue)}\\nOrder Status Breakdown: ${statusLines.join(', ')}\\n${topProducts.length > 0 ? `\\nTop Products by Revenue:\\n${topProducts.join('\\n')}` : ''}\\n${bestDay ? `\\nBest Day: ${bestDay[0]} — ${fmt(bestDay[1].revenue)} (${bestDay[1].orders} orders)` : ''}\\n\\nTop 10 Revenue Days:\\n${top10Days.join('\\n')}`;\n\nreturn [{\n  json: {\n    ...classifyData,\n    summary,\n    total_orders: useOrders.length,\n    total_revenue: Math.round(totalRevenue),\n    analytics: { totalRevenue: Math.round(totalRevenue), completedRevenue: Math.round(completedRevenue), avgOrderValue, statusCount, topProducts, bestDay: bestDay ? bestDay[0] : null, top10Days }\n  }\n}];"
+      },
+      "id": "75645b6b-64a5-432d-a202-08a104334277",
+      "name": "Calculate Analytics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5184,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.ordersUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supaKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supaKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "7a6b8e60-12de-4754-a4c0-b86a53bfd1b0",
+      "name": "Fetch Orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4960,
+        960
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "9887c1b3-7dc4-4736-adf3-55a43545fedd",
+      "name": "Return 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        4960,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fe4715da-3c0c-4c50-a501-8da3a8d3d51b",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4752,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw;\nconst message = String(body.message || '').trim();\nconst business_id = String(body.business_id || '').trim();\nconst session_id = String(body.session_id || Date.now()).trim();\n\nif (!message || !business_id) {\n  return [{ json: { valid: false, error: 'message and business_id required' } }];\n}\n\nconst q = message.toLowerCase();\nconst now = new Date();\nconst todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);\nconst todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);\n\nlet dateFrom, dateTo, period, intentLabel;\n\n// ✅ Specific month+year detection — must come FIRST\nconst monthNames = {\n  jan: 0, january: 0,\n  feb: 1, february: 1,\n  mar: 2, march: 2,\n  apr: 3, april: 3,\n  may: 4,\n  jun: 5, june: 5,\n  jul: 6, july: 6,\n  aug: 7, august: 7,\n  sep: 8, september: 8,\n  oct: 9, october: 9,\n  nov: 10, november: 10,\n  dec: 11, december: 11\n};\n\nconst monthMatch = q.match(/\\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\b/i);\nconst yearMatch = q.match(/\\b(202[0-9])\\b/);\n\nif (monthMatch) {\n  const monthIndex = monthNames[monthMatch[1].toLowerCase()];\n  const year = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear();\n  period = 'specific_month';\n  intentLabel = `${monthMatch[1].charAt(0).toUpperCase() + monthMatch[1].slice(1)} ${year} ki sales`;\n  dateFrom = new Date(year, monthIndex, 1, 0, 0, 0, 0);\n  dateTo = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);\n} else if (q.includes('today') || q.includes('aaj')) {\n  period = 'today'; intentLabel = 'Aaj ki sales';\n  dateFrom = new Date(todayStart); dateTo = new Date(todayEnd);\n} else if (q.includes('yesterday') || q.includes('kal')) {\n  period = 'yesterday'; intentLabel = 'Kal ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 1);\n  dateTo = new Date(todayEnd); dateTo.setDate(dateTo.getDate() - 1);\n} else if (q.includes('90 day') || q.includes('teen mahine') || q.includes('3 month')) {\n  period = '90days'; intentLabel = 'Pichle 90 din ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 90);\n  dateTo = new Date(todayEnd);\n} else if (q.includes('30 day') || q.includes('pichle 30')) {\n  period = '30days'; intentLabel = 'Pichle 30 din ki sales';\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - 30);\n  dateTo = new Date(todayEnd);\n} else if (q.includes('last month') || q.includes('pichle mahine')) {\n  period = 'last_month'; intentLabel = 'Pichle mahine ki sales';\n  dateFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);\n  dateTo = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);\n} else if (q.includes('this week') || q.includes('is hafte') || q.includes('week')) {\n  period = 'week'; intentLabel = 'Is hafte ki sales';\n  const d = now.getDay();\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - d);\n  dateTo = new Date(todayEnd);\n} else if (q.includes('last week') || q.includes('pichle hafte')) {\n  period = 'last_week'; intentLabel = 'Pichle hafte ki sales';\n  const d = now.getDay();\n  dateFrom = new Date(todayStart); dateFrom.setDate(dateFrom.getDate() - d - 7);\n  dateTo = new Date(todayStart); dateTo.setDate(dateTo.getDate() - d - 1); dateTo.setHours(23,59,59,999);\n} else if (q.includes('month') || q.includes('mahina') || q.includes('mahine')) {\n  period = 'month'; intentLabel = 'Is mahine ki sales';\n  dateFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);\n  dateTo = new Date(todayEnd);\n} else if (q.includes('year') || q.includes('saal')) {\n  period = 'year'; intentLabel = 'Is saal ki sales';\n  dateFrom = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);\n  dateTo = new Date(todayEnd);\n} else {\n  period = 'all_time'; intentLabel = 'Tamam sales';\n  dateFrom = new Date('2020-01-01');\n  dateTo = new Date(todayEnd);\n}\n\nconst SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliemx5a3FndWlxYnd2a2JxcmF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTk0MDcsImV4cCI6MjA4NTY3NTQwN30.qnV96DNAZ8_9KQ9xbyOQrjbr6z-amBtebPn3rBM_kRw';\nconst base = 'https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_orders';\nconst fields = 'wc_order_id,order_number,status,total,customer_name,date_created,line_items';\n\nconst ordersUrl = `${base}?business_id=eq.${business_id}&select=${fields}&order=date_created.desc&limit=500`;\n\nreturn [{\n  json: { valid: true, message, business_id, session_id, period, intentLabel,\n    dateFrom: dateFrom.toISOString(), dateTo: dateTo.toISOString(),\n    ordersUrl, supaKey: SUPA_KEY, q }\n}];"
+      },
+      "id": "75d5e14e-8c95-4cca-a2cb-4fdc5e66f699",
+      "name": "Classify & Build Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sales-analytics",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "63c15621-60e0-4644-baec-394ad72999b5",
+      "name": "Sales Analytics Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        4304,
+        1088
+      ],
+      "webhookId": "sales-analytics-fixed-v1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Extract Reply": {
+      "main": [
+        [
+          {
+            "node": "Return Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT Analysis": {
+      "main": [
+        [
+          {
+            "node": "Extract Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Analytics": {
+      "main": [
+        [
+          {
+            "node": "GPT Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Orders": {
+      "main": [
+        [
+          {
+            "node": "Calculate Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Fetch Orders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify & Build Query": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sales Analytics Webhook": {
+      "main": [
+        [
+          {
+            "node": "Classify & Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "d77c760d-63c3-4b83-85b5-31805b7e3f64",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "brRimxzIJxUgmx1mcfO7S",
+  "tags": []
+}
