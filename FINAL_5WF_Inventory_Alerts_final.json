@@ -1,0 +1,622 @@
+{
+  "name": "FINAL_5WF_Inventory_Alerts_final",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "b16e20a5-f3ba-40fc-91c6-68b168b1e414",
+      "name": "Hourly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -896,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/businesses?status=eq.active&select=business_id,business_name,telegram_chat_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "40106ad9-2aa9-4c13-b44f-354f6d0808aa",
+      "name": "Fetch Active Businesses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -672,
+        96
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\n\n// Single object ya array dono handle karo\nlet businesses = [];\nif (Array.isArray(raw)) {\n  businesses = raw;\n} else if (raw.body && Array.isArray(raw.body)) {\n  businesses = raw.body;\n} else if (raw.business_id) {\n  businesses = [raw]; // Single object\n}\n\nif (businesses.length === 0) {\n  return [{ json: { skip: true } }];\n}\n\nreturn businesses.map(biz => ({ json: biz }));"
+      },
+      "id": "90434a5d-4f95-4f04-bbcb-7e97a56e5c12",
+      "name": "Parse Businesses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-01",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f7323d62-b66b-4f5a-8932-487d5256af37",
+      "name": "Any Businesses?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { stopped: true } }];"
+      },
+      "id": "62a9e19d-fe4b-468b-85b6-39a80cdcd3e7",
+      "name": "Stop No Businesses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const biz = $input.first().json;\nreturn [{ json: {\n  business_id: biz.business_id,\n  business_name: biz.business_name,\n  telegram_chat_id: biz.telegram_chat_id\n} }];"
+      },
+      "id": "35510f81-ad4a-4cd6-91c2-b88112be2906",
+      "name": "Prepare Business Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_products?business_id=eq.{{ $('Prepare Business Data').first().json.business_id }}&stock_quantity=lt.10&stock_quantity=gt.0&select=wc_product_id,stock_quantity,stock_status,product_data",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "79a116b4-0efc-4457-b9b2-05b955d41458",
+      "name": "Fetch Low Stock from Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        192
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/woocommerce_products?business_id=eq.{{ $('Prepare Business Data').first().json.business_id }}&stock_status=eq.outofstock&select=wc_product_id,stock_quantity,stock_status,product_data",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ea831b95-c0d9-4766-92bd-1fe3a15ad14e",
+      "name": "Fetch Out of Stock from Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        192
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const biz = $('Prepare Business Data').first().json;\n\n// All items from both nodes\nconst outItems = $('Fetch Out of Stock from Supabase').all().map(i => i.json);\nconst lowItems = $('Fetch Low Stock from Supabase').all().map(i => i.json);\n\nfunction parseItems(items, status) {\n  const seen = new Set();\n  const result = [];\n  items.forEach(p => {\n    if (!p.wc_product_id || seen.has(p.wc_product_id)) return;\n    seen.add(p.wc_product_id);\n    let name = `Product #${p.wc_product_id}`;\n    try {\n      const pd = typeof p.product_data === 'string' ? JSON.parse(p.product_data) : p.product_data;\n      if (pd?.name) name = pd.name;\n    } catch(e) {}\n    result.push({\n      product_id: p.wc_product_id,\n      product_name: name,\n      stock_quantity: p.stock_quantity || 0,\n      status\n    });\n  });\n  return result;\n}\n\nconst outOfStock = parseItems(outItems, 'out_of_stock');\nconst lowStock = parseItems(lowItems, 'low');\nconst allProducts = [...outOfStock, ...lowStock];\n\nif (allProducts.length === 0) {\n  return [{ json: { skip: true, reason: 'No products found', business_id: biz.business_id } }];\n}\n\nreturn [{ json: { ...biz, products: allProducts, lowStockCount: lowStock.length, outOfStockCount: outOfStock.length, totalCount: allProducts.length } }];"
+      },
+      "id": "bca1458d-4b93-4282-a437-bb78daefbb9f",
+      "name": "Process Stock Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-02",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8f345493-9830-405e-b185-6384a395ece7",
+      "name": "Any Low Stock?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { stopped: true, reason: 'No low stock' } }];"
+      },
+      "id": "084634ce-6c15-4e77-8677-62b927fb0236",
+      "name": "Stop No Low Stock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/inventory_alerts?business_id=eq.{{ $json.business_id }}&alert_date=eq.{{ new Date().toISOString().split('T')[0] }}&select=product_id,telegram_sent,email_sent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1e069fe-24e9-4416-8d8f-5495f1025b8d",
+      "name": "Check Already Notified",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Process Stock Data').first().json;\nconst raw = $input.first().json;\nconst alreadyNotified = raw.body ? raw.body : (Array.isArray(raw) ? raw : []);\nconst notifiedIds = new Set(alreadyNotified.filter(a => a.telegram_sent).map(a => a.product_id));\nconst newProducts = d.products.filter(p => !notifiedIds.has(p.product_id));\nif (newProducts.length === 0) {\n  return [{ json: { skip: true, reason: 'All already notified today' } }];\n}\nreturn [{ json: { ...d, products: newProducts } }];"
+      },
+      "id": "83ba6ff6-5dbe-4098-a8f3-82cf0dfcae62",
+      "name": "Filter New Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-03",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3cc82d1d-f660-4e62-981e-fd37c821488a",
+      "name": "New Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst today = new Date().toISOString().split('T')[0];\n\nlet msg = `⚠️ *Inventory Alert!*\\n`;\nmsg += `🏢 ${d.business_name}\\n`;\nmsg += `📅 ${today}\\n`;\nmsg += `━━━━━━━━━━━━━━━━━━━━━━━━\\n\\n`;\n\nconst outOfStock = d.products.filter(p => p.status === 'out_of_stock');\nconst lowStock = d.products.filter(p => p.status === 'low');\n\nif (outOfStock.length > 0) {\n  msg += `🔴 *Out of Stock (${outOfStock.length})*\\n`;\n  outOfStock.forEach((p, i) => { msg += `${i+1}. ${p.product_name} — 0 units\\n`; });\n  msg += `\\n`;\n}\nif (lowStock.length > 0) {\n  msg += `🟡 *Low Stock (${lowStock.length})*\\n`;\n  lowStock.forEach((p, i) => { msg += `${i+1}. ${p.product_name} — ${p.stock_quantity} units\\n`; });\n  msg += `\\n`;\n}\n\nmsg += `━━━━━━━━━━━━━━━━━━━━━━━━\\n`;\nmsg += `📧 Supplier ko email bhejna hai?\\n`;\nmsg += `Reply karo: *SEND EMAIL* ✅\\n\\n_BizFlow AI_`;\n\nif (msg.length > 4000) msg = msg.substring(0, 4000) + '...';\nreturn [{ json: { ...d, alertMessage: msg } }];"
+      },
+      "id": "a1d50c05-e633-4977-a915-387a65563bcb",
+      "name": "Build Telegram Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "text": "={{ $json.alertMessage }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "5bab21df-7236-47a0-b9f1-5ce99f497999",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2016,
+        320
+      ],
+      "webhookId": "33a90c90-6ea4-48ec-a288-efa7039ce42d",
+      "credentials": {
+        "telegramApi": {
+          "id": "owK50GCYyhb7W6bO",
+          "name": "Nazissh Telegram account 3"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Build Telegram Alert').first().json;\nconst today = new Date().toISOString().split('T')[0];\nconst batch = d.products.map(p => ({\n  business_id: d.business_id,\n  product_id: p.product_id,\n  product_name: p.product_name,\n  stock_quantity: p.stock_quantity,\n  status: p.status,\n  threshold: 10,\n  telegram_sent: true,\n  email_sent: false,\n  email_confirmed: false,\n  alert_date: today\n}));\nreturn [{ json: { batch, business_id: d.business_id, products: d.products, telegram_chat_id: d.telegram_chat_id, business_name: d.business_name } }];"
+      },
+      "id": "a14315fa-ea40-45d0-a6e3-76140626f982",
+      "name": "Prepare Alert Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ibzlykqguiqbwvkbqrau.supabase.co/rest/v1/inventory_alerts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.batch) }}",
+        "options": {}
+      },
+      "id": "14cf1c1e-663a-4935-8761-f241d2aaff27",
+      "name": "Log Alert to Supabase1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2496,
+        304
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "f4s3Sbni1QX46Qk1",
+          "name": "Supabase account 6"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Hourly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Active Businesses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Active Businesses": {
+      "main": [
+        [
+          {
+            "node": "Parse Businesses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Businesses": {
+      "main": [
+        [
+          {
+            "node": "Any Businesses?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Businesses?": {
+      "main": [
+        [
+          {
+            "node": "Stop No Businesses",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Business Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Business Data": {
+      "main": [
+        [
+          {
+            "node": "Fetch Low Stock from Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Low Stock from Supabase": {
+      "main": [
+        [
+          {
+            "node": "Fetch Out of Stock from Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Out of Stock from Supabase": {
+      "main": [
+        [
+          {
+            "node": "Process Stock Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Stock Data": {
+      "main": [
+        [
+          {
+            "node": "Any Low Stock?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Low Stock?": {
+      "main": [
+        [
+          {
+            "node": "Stop No Low Stock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Already Notified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Already Notified": {
+      "main": [
+        [
+          {
+            "node": "Filter New Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter New Alerts": {
+      "main": [
+        [
+          {
+            "node": "New Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Stop No Low Stock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Telegram Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Alert": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert Log": {
+      "main": [
+        [
+          {
+            "node": "Log Alert to Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "6655091f-b2c3-4f4f-980f-3fb1655a0df0",
+  "meta": {
+    "instanceId": "f3ea4b3b1af91f7cdcb29d6c1b5ed067ec80771b0665b888848e0d76a943f98c"
+  },
+  "id": "7-hlA4njIQmE3UY6JbtM1",
+  "tags": []
+}
